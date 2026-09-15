@@ -10,6 +10,11 @@ env-%:
 DIST_DIR = dist
 MOVE = mv
 
+# tsunderick: bundled Operator Mono, fetched from private dotfiles repo and converted
+# to TTF (see scripts/otf2ttf.py + downloadFonts task in app/build.gradle).
+# make fonts is a thin alias - the Gradle task is the single implementation.
+FONT_DIR = app/thirdparty/assets/fonts
+
 all: $(DIST_DIR) spellcheck lint deptree test build aapt_dump_badging
 
 ####################################################################################
@@ -39,7 +44,62 @@ adb: env-ANDROID_SDK_ROOT
 aapt: env-ANDROID_SDK_ROOT
 	"${ANDROID_BUILD_TOOLS}/aapt" $A 2>&1 | grep -v 'application-label-' | tee "$(DIST_DIR)/log/aapt$L.log"
 
-build:
+fonts:
+	@mkdir -p $(DIST_DIR)/log/
+	@./gradlew downloadFonts 2>&1 | tee "$(DIST_DIR)/log/fonts.log" | grep -E "^>>|WARNING" || true
+	@echo "-----------------------------------------------------------------------------------"
+
+# --- tsunderick: terminal dev loop ---------------------------------------------
+# make dev         boot emulator (if needed) + incremental build + install + relaunch
+# make emulator    boot tsunderelkasten AVD and wait for full boot
+# make relaunch    force-stop + fresh-launch the app on the emulator
+export ANDROID_SDK_ROOT ?= $(HOME)/Android/Sdk
+EMULATOR_BIN ?= /opt/android-sdk/emulator/emulator
+AVD          ?= tsunderelkasten
+ADB_BIN      ?= $(ANDROID_SDK_ROOT)/platform-tools/adb
+DEV_PKG      ?= net.gsantner.markor
+
+.PHONY: emulator gradle-dev relaunch dev
+emulator:
+	@if $(ADB_BIN) devices | grep -q "emulator.*device$$"; then \
+	  echo ">> emulator already running"; \
+	else \
+	  echo ">> booting $(AVD) ..."; \
+	  setsid nohup $(EMULATOR_BIN) -avd $(AVD) -no-boot-anim < /dev/null > /tmp/tsun-emulator.log 2>&1 & \
+	  $(ADB_BIN) wait-for-device; \
+	  until [ "$$($(ADB_BIN) shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done; \
+	  echo ">> emulator ready"; \
+	fi
+
+# Dev builds keep the Gradle daemon (upstream's `gradle` target uses --no-daemon,
+# which would slow the edit-build loop to a full JVM startup every time).
+gradle-dev:
+	@mkdir -p $(DIST_DIR)/log/
+	./gradlew assembleFlavorDefaultDebug
+
+# Install straight from the dev build output (upstream `install` expects `make build`'s dist/ copy),
+# then auto-grant storage so no permission UI appears after a re-flash (dev loop only)
+install-dev:
+	$(ADB_BIN) install -r app/build/outputs/apk/flavorDefault/debug/*.apk
+	-$(ADB_BIN) shell pm grant $(DEV_PKG) android.permission.READ_EXTERNAL_STORAGE
+	-$(ADB_BIN) shell pm grant $(DEV_PKG) android.permission.WRITE_EXTERNAL_STORAGE
+	-$(ADB_BIN) shell appops set $(DEV_PKG) MANAGE_EXTERNAL_STORAGE allow
+
+relaunch:
+	-$(ADB_BIN) shell am force-stop $(DEV_PKG)
+	$(MAKE) A="shell monkey -p $(DEV_PKG) -c android.intent.category.LAUNCHER 1" L="dev" adb
+
+## Wipe app data (uninstall) so the next `make dev` runs the fresh first-run flow
+reset-app:
+	-$(ADB_BIN) uninstall $(DEV_PKG)
+
+## Follow the app's own logcat output (Ctrl-C to stop)
+log:
+	$(ADB_BIN) logcat --pid=$$($(ADB_BIN) shell pidof $(DEV_PKG) | tr -d '\r\n') || $(ADB_BIN) logcat
+
+dev: emulator gradle-dev install-dev relaunch
+
+build: fonts
 	rm -f $(DIST_DIR)/*.apk
 	$(MAKE) A="clean assembleFlavor$(FLAVOR) -x lint" gradle
 	find app -type f -newermt '-300 seconds' -iname '*.apk' -not -iname '*unsigned.apk' | xargs cp -R -t $(DIST_DIR)/

@@ -10,6 +10,11 @@
     <color name="background">@color/dark__background</color>
     <color name="light_border">@color/grey</color>
 
+    <!-- tsunderick OLED overrides (night mode = Black theme active) -->
+    <color name="primary">#000000</color>
+    <color name="dark__primary_text">#f0eaed</color>
+    <color name="dark__secondary_text">#da9fdc</color>
+
     <!-- All values specified only in base colors.xml  -->
 
 </resources>

@@ -59,7 +59,8 @@ public abstract class TextConverterBase {
     protected static final String HTML_DOCTYPE = "<!DOCTYPE html>";
     protected static final String HTML001_HEAD_WITH_BASESTYLE = "<html lang='" + TOKEN_POST_LANG + "'><head><meta charset='UTF-8'>" + CSS_S + "html,body{padding:4px 8px 4px 8px;font-family:'" + TOKEN_FONT + "';}h1,h2,h3,h4,h5,h6{font-family:'sans-serif-condensed';}a{color: " + TOKEN_LINK_COLOR + ";text-decoration:underline;}img{height:auto;max-width:100%;max-height: 90vh;margin:auto;}" + CSS_E;
     protected static final String HTML002_HEAD_WITH_STYLE_LIGHT = CSS_S + "html,body{color:#303030;}blockquote{color:#73747d;}" + CSS_E;
-    protected static final String HTML002_HEAD_WITH_STYLE_DARK = CSS_S + "html,body{color:#ffffff;background-color:#303030;}a:visited{color:#dddddd;}blockquote{color:#cccccc;}" + CSS_E;
+    // tsunderick: OLED dark style - pure black, warm white text, sakura accents
+    protected static final String HTML002_HEAD_WITH_STYLE_DARK = CSS_S + "html,body{color:#f0eaed;background-color:#000000;}a:link,a:visited{color:#ff8fb1;}blockquote{color:#da9fdc;border-left:3px solid #ff8fb1;padding-left:8px;margin-left:0;margin-right:0;}code,pre{background-color:#111111;}" + CSS_E;
     protected static final String HTML003_RIGHT_TO_LEFT = CSS_S + "body{text-align:" + TOKEN_TEXT_DIRECTION + ";direction:rtl;}" + CSS_E;
     protected static final String HTML004_HEAD_META_VIEWPORT_MOBILE = "<style>video, img { max-width: 100%; } pre { max-width: 100%; overflow: auto; } </style>";//"<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'>";
     protected static final String HTML100_PERCENT_IN_FILEPATH = "<base>" + JS_S + "var newbase = document.baseURI.split('%').join('%25'); document.querySelector('base').setAttribute('href', newbase);" + JS_E;
@@ -156,10 +157,26 @@ public abstract class TextConverterBase {
         html += HTML_ON_PAGE_LOAD_S + onLoadJs + HTML_ON_PAGE_LOAD_E;
 
         // Add custom font css if font is a filepath, swap path with new font-family
+        // tsunderick: bundled fonts are served to the WebView over
+        // https://appassets.androidplatform.net (WebViewAssetLoader, hooked into
+        // MarkorWebViewClient) - plain file:// subresources are blocked from file://
+        // pages (setAllowFileAccessFromFileURLs=false), so they never loaded.
         String font = as.getFontFamily();
         if (font.startsWith("/")) {
-            html += CSS_S + "@font-face { font-family: customfont; src: url('file://" + font + "'); }" + CSS_E;
-            font = "customfont";
+            final StringBuilder fontCss = new StringBuilder();
+            appendFontFace(fontCss, font, null, null);
+            // For bundled font families, add matching bold/italic faces so they render true instead of synthesized
+            if (font.startsWith("/android_asset/fonts/") && font.contains(" - ")) {
+                final String base = font.substring(0, font.lastIndexOf(" - "));
+                final String[][] variants = {{" - Bold.ttf", "bold", "normal"}, {" - Italic.ttf", "normal", "italic"}, {" - Bold Italic.ttf", "bold", "italic"}};
+                for (String[] v : variants) {
+                    appendFontFace(fontCss, base + v[0], v[1], v[2]);
+                }
+            }
+            if (fontCss.length() > 0) {
+                html += CSS_S + fontCss + CSS_E;
+                font = "customfont";
+            }
         }
 
         // Remove duplicate style blocks
@@ -180,9 +197,9 @@ public abstract class TextConverterBase {
 
         // Replace tokens
         html = html
-                .replace(TOKEN_BW_INVERSE_OF_THEME, darkTheme ? "white" : "black")
-                .replace(TOKEN_BW_INVERSE_OF_THEME_HEADER_UNDERLINE, darkTheme ? "#eaecef" : "#696969")
-                .replace(TOKEN_COLOR_GREY_OF_THEME, darkTheme ? "#393939" : GsTextUtils.colorToHexString(ContextCompat.getColor(context, R.color.lighter_grey)))
+                .replace(TOKEN_BW_INVERSE_OF_THEME, darkTheme ? "#444444" : "black")
+                .replace(TOKEN_BW_INVERSE_OF_THEME_HEADER_UNDERLINE, darkTheme ? "#ff8fb1" : "#696969")
+                .replace(TOKEN_COLOR_GREY_OF_THEME, darkTheme ? "#1c1c1c" : GsTextUtils.colorToHexString(ContextCompat.getColor(context, R.color.lighter_grey)))
                 .replace(TOKEN_LINK_COLOR, as.getViewModeLinkColor())
                 .replace(TOKEN_ACCENT_COLOR, GsTextUtils.colorToHexString(ContextCompat.getColor(context, R.color.accent)))
                 .replace(TOKEN_TEXT_DIRECTION, as.isRenderRtl() ? "right" : "left")
@@ -191,11 +208,45 @@ public abstract class TextConverterBase {
                 .replace(TOKEN_POST_TODAY_DATE, DateFormat.getDateFormat(context).format(new Date()))
                 .replace(TOKEN_FILEURI_VIEWED_FILE, (file == null ? "" : Uri.fromFile(file.getAbsoluteFile()).toString().replace("'", "\\'").replace("\"", "\\\"")));
 
+        // tsunderick: when a custom font is active, headings and code must use it too -
+        // upstream CSS hardcodes 'sans-serif-condensed' for headings and monospace for code
+        if (font.equals("customfont")) {
+            html = html.replace("font-family:'sans-serif-condensed'", "font-family:'customfont'")
+                    .replace("font-family: 'sans-serif-condensed'", "font-family: 'customfont'")
+                    .replace("font-family: monospace", "font-family: customfont")
+                    .replace("font-family:monospace", "font-family:customfont");
+        }
+
         return html;
     }
 
     protected String getContentType() {
         return CONTENT_TYPE_HTML;
+    }
+
+    //#################### tsunderick: custom font via WebViewAssetLoader ####################
+
+    private static final String APPASSETS_BASE = "https://appassets.androidplatform.net/assets/";
+
+    /**
+     * Append an {@code @font-face} rule for the given font file path to {@code fontCss}.
+     * Only asset paths ({@code /android_asset/...}) are supported - they are served by
+     * the {@link androidx.webkit.WebViewAssetLoader} registered on the preview's client.
+     * {@code weight}/{@code style} may be null for the default face.
+     */
+    private static void appendFontFace(final StringBuilder fontCss, final String fontPath, final String weight, final String style) {
+        if (!fontPath.startsWith("/android_asset/")) {
+            return;
+        }
+        final String url = APPASSETS_BASE + fontPath.substring("/android_asset/".length()).replace(" ", "%20");
+        fontCss.append(" @font-face { font-family: customfont;");
+        if (weight != null) {
+            fontCss.append(" font-weight: ").append(weight).append(";");
+        }
+        if (style != null) {
+            fontCss.append(" font-style: ").append(style).append(";");
+        }
+        fontCss.append(" src: url('").append(url).append("'); }");
     }
 
     public boolean isFileOutOfThisFormat(final @NonNull File file) {

@@ -110,7 +110,7 @@ public class GsFontPreferenceCompat extends ListPreference {
         }
 
         for (File file : getAdditionalFonts()) {
-            _fontNames = appendToArray(_fontNames, file.getName().replace(".ttf", "").replace(".TTF", ""));
+            _fontNames = appendToArray(_fontNames, file.getName().replace(".ttf", "").replace(".TTF", "").replace(".otf", "").replace(".OTF", ""));
             _fontValues = appendToArray(_fontValues, file.getAbsolutePath());
         }
 

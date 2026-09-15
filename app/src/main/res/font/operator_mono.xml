@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  tsun-markor fork: Operator Mono family for theme-wide UI font.
+  The .otf files in this directory are NOT committed (commercial font) -
+  they are fetched at build time from the private dotfiles repo
+  (make fonts / downloadFonts task). If the fetch fails, the task
+  copies the bundled Source Pro Code font as a stand-in so builds
+  stay green (CI). License of this file: Apache 2.0.
+-->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+    <font android:fontStyle="normal" android:fontWeight="400" android:font="@font/operator_mono_regular" />
+    <font android:fontStyle="italic" android:fontWeight="400" android:font="@font/operator_mono_italic" />
+    <font android:fontStyle="normal" android:fontWeight="700" android:font="@font/operator_mono_bold" />
+    <font android:fontStyle="italic" android:fontWeight="700" android:font="@font/operator_mono_bold_italic" />
+</font-family>

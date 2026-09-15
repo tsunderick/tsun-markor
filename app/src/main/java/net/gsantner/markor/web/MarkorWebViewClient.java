@@ -10,7 +10,11 @@ package net.gsantner.markor.web;
 import android.app.Activity;
 import android.content.Context;
 import android.net.Uri;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
+
+import androidx.webkit.WebViewAssetLoader;
 
 import net.gsantner.markor.activity.DocumentActivity;
 import net.gsantner.markor.model.AppSettings;
@@ -19,10 +23,35 @@ import net.gsantner.opoc.web.GsWebViewClient;
 
 public class MarkorWebViewClient extends GsWebViewClient {
     protected final Activity _activity;
+    // tsun-markor fork: serves bundled assets (fonts) over appassets.androidplatform.net
+    private WebViewAssetLoader _assetLoader;
 
     public MarkorWebViewClient(final WebView webView, final Activity activity) {
         super(webView);
         _activity = activity;
+    }
+
+    /** tsun-markor fork: optional loader so the preview can load bundled fonts. */
+    public void setAssetLoader(final WebViewAssetLoader loader) {
+        _assetLoader = loader;
+    }
+
+    @Override
+    public WebResourceResponse shouldInterceptRequest(final WebView view, final WebResourceRequest request) {
+        if (_assetLoader != null) {
+            final WebResourceResponse response = _assetLoader.shouldInterceptRequest(request.getUrl());
+            if (response != null) {
+                // tsun-markor fork: the preview page is a file:// URL (Origin: null), and
+                // fonts are CORS-checked. The loader does not set the header on all
+                // versions, so ensure it is present or Chromium blocks the font.
+                final java.util.Map<String, String> headers = response.getResponseHeaders() == null
+                        ? new java.util.HashMap<>() : new java.util.HashMap<>(response.getResponseHeaders());
+                headers.put("Access-Control-Allow-Origin", "*");
+                response.setResponseHeaders(headers);
+                return response;
+            }
+        }
+        return super.shouldInterceptRequest(view, request);
     }
 
     @Override

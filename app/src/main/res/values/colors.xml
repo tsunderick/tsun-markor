@@ -22,7 +22,7 @@
 
     <!-- Color values -->
     <color name="primary">#1E2135</color>
-    <color name="accent">#F04B4B</color>
+    <color name="accent">#ff8fb1</color>
     <color name="divider">#808080</color>
 
     <color name="accent_light">#FF9800</color>

@@ -32,7 +32,9 @@ public class IntroActivity extends AppIntro {
 
     public static boolean isFirstStart(final Context context) {
         final SharedPreferences getPrefs = PreferenceManager.getDefaultSharedPreferences(context.getApplicationContext());
-        return !getPrefs.getBoolean(PREF_KEY_WAS_SHOWN, false);
+        // tsun-markor fork: default to "already shown" so re-flashing the app does not
+        // bring the intro back; it stays accessible and once-run state still persists.
+        return !getPrefs.getBoolean(PREF_KEY_WAS_SHOWN, true);
     }
 
     @Override

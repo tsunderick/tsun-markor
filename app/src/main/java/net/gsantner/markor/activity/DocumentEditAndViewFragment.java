@@ -44,6 +44,7 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SearchView;
 import androidx.fragment.app.FragmentActivity;
+import androidx.webkit.WebViewAssetLoader;
 
 import com.google.android.material.snackbar.Snackbar;
 
@@ -53,6 +54,7 @@ import net.gsantner.markor.R;
 import net.gsantner.markor.format.ActionButtonBase;
 import net.gsantner.markor.format.FormatRegistry;
 import net.gsantner.markor.format.TextConverterBase;
+import net.gsantner.markor.frontend.BarAutoHideHelper;
 import net.gsantner.markor.frontend.DraggableScrollbarScrollView;
 import net.gsantner.markor.frontend.FileInfoDialog;
 import net.gsantner.markor.frontend.MarkorDialogFactory;
@@ -108,6 +110,8 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
     private ViewGroup _textActionsBar;
 
     private DraggableScrollbarScrollView _verticalScrollView;
+    // tsun-markor fork: auto-hides top app bar + bottom actions bar on scroll / keyboard
+    private BarAutoHideHelper _barAutoHideHelper;
     private HorizontalScrollView _horizontalScrollView;
     private LineNumbersView _lineNumbersView;
     private TextView _searchResultTextView;
@@ -152,6 +156,25 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
         _lineNumbersView = view.findViewById(R.id.document__fragment__edit__line_numbers_view);
         _cu = new MarkorContextUtils(activity);
         _editTextUndoRedoHelper = new TextViewUndoRedo();
+
+        // tsun-markor fork: auto-hide top/bottom bars on scroll direction and keyboard
+        _barAutoHideHelper = new BarAutoHideHelper(activity, view, new BarAutoHideHelper.ScrollController() {
+            @Override
+            public int getScrollY() {
+                return (_isPreviewVisible && _webView != null) ? _webView.getScrollY()
+                        : (_verticalScrollView != null ? _verticalScrollView.getScrollY() : 0);
+            }
+
+            @Override
+            public void scrollTo(final int y) {
+                if (_isPreviewVisible && _webView != null) {
+                    _webView.scrollTo(0, y);
+                } else if (_verticalScrollView != null) {
+                    _verticalScrollView.scrollTo(0, y);
+                }
+            }
+        });
+        _barAutoHideHelper.attach();
         _editorHolder.setOnClickListener(v -> {
             _hlEditor.requestFocus();
             _cu.showSoftKeyboard(activity, true, _hlEditor);
@@ -799,7 +822,12 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
         final View bar = view.findViewById(R.id.document__fragment__edit__text_actions_bar);
         if (bar != null && _verticalScrollView != null) {
             final boolean visible = _format.getActions().loadActionBarVisible() && _textActionsBar.getChildCount() > 0;
-            parent.setVisibility(visible ? View.VISIBLE : View.GONE);
+            if (_barAutoHideHelper != null) {
+                _barAutoHideHelper.setPreviewMode(_isPreviewVisible);
+                _barAutoHideHelper.setBottomBarAllowed(visible);
+            } else {
+                parent.setVisibility(visible ? View.VISIBLE : View.GONE);
+            }
         }
     }
 
@@ -1168,6 +1196,11 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
     private void setupWebViewIfNeeded(final Activity activity) {
         if (_webView == null) {
             _webView = (WebView) _webViewStub.inflate();
+            // tsun-markor fork: feed webview scrolls into the auto-hide helper
+            // (webview scrolls do not dispatch window-wide scroll-changed events)
+            if (_webView instanceof DraggableScrollbarWebView && _barAutoHideHelper != null) {
+                ((DraggableScrollbarWebView) _webView).setOnScrollChangedListener(_barAutoHideHelper::onScrollTick);
+            }
             _webView.setWebChromeClient(new GsWebViewChromeClient(_webView, activity, activity.findViewById(R.id.document__fragment_fullscreen_overlay)));
             _webView.addJavascriptInterface(this, "Android");
             _webView.setBackgroundColor(Color.TRANSPARENT);
@@ -1191,6 +1224,10 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
             }
 
             _webViewClient = new MarkorWebViewClient(_webView, activity);
+            // tsun-markor fork: serve bundled fonts to the preview over appassets.androidplatform.net
+            _webViewClient.setAssetLoader(new WebViewAssetLoader.Builder()
+                    .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(activity.getApplicationContext()))
+                    .build());
             _webView.setWebViewClient(_webViewClient);
 
             if (_webView instanceof DraggableScrollbarWebView) {
@@ -1285,6 +1322,10 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
 
     @Override
     public void onDestroyView() {
+        if (_barAutoHideHelper != null) {
+            _barAutoHideHelper.detach();
+            _barAutoHideHelper = null;
+        }
         if (_webView != null) {
             try {
                 _webView.loadUrl("about:blank");

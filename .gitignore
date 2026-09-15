@@ -106,3 +106,13 @@ app/flavor*
 /.vscode
 
 cm-editor/node_modules/
+
+# tsunderick: locally fetched non-free assets (Operator Mono) must never be committed.
+# Precise pattern so upstream's own committed fonts in app/thirdparty stay tracked.
+/app/thirdparty/assets/fonts/Operator*.ttf
+/app/thirdparty/assets/fonts/Operator*.otf
+/.font-cache/
+
+# tsunderick: operator mono build-time font files (see tsun-README.md)
+app/src/main/res/font/*.otf
+app/src/main/res/font/*.ttf

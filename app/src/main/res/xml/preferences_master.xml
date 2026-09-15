@@ -401,8 +401,8 @@
         android:title="@string/view_mode">
 
         <CheckBoxPreference
-            android:defaultValue="false"
             android:icon="@drawable/ic_visibility_black_24dp"
+            android:defaultValue="true"
             android:key="@string/pref_key__is_preview_first"
             android:summary="@string/open_existing_files_in_view_mode"
             android:title="@string/prefer_view" />
@@ -653,7 +653,7 @@
     <!-- Most important settings -->
     <PreferenceCategory android:title="@string/essential">
         <ListPreference
-            android:defaultValue="@string/app_theme_system"
+            android:defaultValue="@string/app_theme_black"
             android:dialogTitle="@string/theme"
             android:entries="@array/pref_arrdisp__app_themes"
             android:entryValues="@array/pref_arrkeys__app_themes"

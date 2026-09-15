@@ -86,8 +86,9 @@ public class AppSettings extends GsSharedPreferencesPropertyBackend {
         return getBool(R.string.pref_key__load_last_directory_at_startup, false);
     }
 
+    // tsunderick: preview-first by default (toggle in Settings -> "Prefer view mode")
     public boolean isPreferViewMode() {
-        return getBool(R.string.pref_key__is_preview_first, false);
+        return getBool(R.string.pref_key__is_preview_first, true);
     }
 
     public void setNotebookDirectory(final File file) {
@@ -733,7 +734,7 @@ public class AppSettings extends GsSharedPreferencesPropertyBackend {
     }
 
     public String getAppThemeName() {
-        return getString(R.string.pref_key__app_theme, _context.getString(R.string.app_theme_system));
+        return getString(R.string.pref_key__app_theme, _context.getString(R.string.app_theme_black));
     }
 
     public void setEditorBasicColor(boolean forDarkMode, @ColorRes int fgColor, @ColorRes int bgColor) {
@@ -953,7 +954,8 @@ public class AppSettings extends GsSharedPreferencesPropertyBackend {
     }
 
     public String getViewModeLinkColor() {
-        return GsTextUtils.colorToHexString(getInt(R.string.pref_key__view_mode_link_color, Color.parseColor("#388E3C")));
+        // tsunderick: sakura pink instead of the stock green
+        return GsTextUtils.colorToHexString(getInt(R.string.pref_key__view_mode_link_color, Color.parseColor("#ff8fb1")));
     }
 
     public String getUnorderedListCharacter() {

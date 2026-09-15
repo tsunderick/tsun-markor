@@ -18,6 +18,8 @@ public class DraggableScrollbarWebView extends WebView {
     private boolean _ltr = true;
     private int _thumbHeight;
     private int _grabWidth;
+    // tsun-markor fork: notified whenever this webview scrolls (e.g. for auto-hiding bars)
+    private Runnable _onScrollChangedListener;
 
     public DraggableScrollbarWebView(Context context) {
         super(context);
@@ -29,6 +31,19 @@ public class DraggableScrollbarWebView extends WebView {
 
     public DraggableScrollbarWebView(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
+    }
+
+    /** tsun-markor fork: hook for consumers that need scroll events of this webview. */
+    public void setOnScrollChangedListener(final Runnable listener) {
+        _onScrollChangedListener = listener;
+    }
+
+    @Override
+    protected void onScrollChanged(final int l, final int t, final int oldl, final int oldt) {
+        super.onScrollChanged(l, t, oldl, oldt);
+        if (_onScrollChangedListener != null) {
+            _onScrollChangedListener.run();
+        }
     }
 
     @Override

@@ -13,7 +13,8 @@ if (enable_plugin_kotlin) {
     apply plugin: 'kotlin-kapt'
 }
 
-rootProject.ext.version_minSdk = 18
+// tsunderick: bumped 18 -> 19 for androidx.webkit (WebViewAssetLoader); Android 4.4+, 2013
+rootProject.ext.version_minSdk = 19
 
 // https://github.com/vsch/flexmark-java/releases
 ext.version_library_flexmark = "0.42.14"
@@ -91,6 +92,70 @@ android {
 
 }
 
+/* tsunderick: fetch Operator Mono from the private dotfiles repo and convert to TTF.
+   Flow: gh download OTF -> .font-cache (gitignored, survives gradle clean)
+         -> convert CFF->TrueType outlines via scripts/otf2ttf.py (fontTools)
+         -> copy TTF into app/thirdparty/assets/fonts (APK assets, font picker)
+            and src/main/res/font (theme UI font via @font/operator_mono).
+
+   Why TTF: Chromium's OTS sanitizer rejects Operator Mono's CFF table
+   ("OTS parsing error: CFF : Failed to parse table") so the preview WebView
+   silently falls back - TrueType outlines pass OTS. The editor is unaffected
+   (Android's parser is lenient) but we ship one format everywhere.
+
+   Skips with warnings when gh/python/fontTools are unavailable (CI): the
+   bundled Source Pro Code font stands in so builds stay green. */
+task downloadFonts {
+    def cacheDir = rootProject.file('.font-cache')
+    def assetsFontDir = file('thirdparty/assets/fonts')
+    def resFontDir = file('src/main/res/font')
+    def convertScript = rootProject.file('scripts/otf2ttf.py')
+    def fallback = file('thirdparty/assets/fonts/Source Pro Code.ttf')
+    def slotToFile = ['regular': 'Regular', 'italic': 'Italic', 'bold': 'Bold', 'bold_italic': 'Bold Italic']
+    doLast {
+        assetsFontDir.mkdirs()
+        resFontDir.mkdirs()
+        // purge stale OTFs from earlier builds (dead weight + duplicate picker entries)
+        fileTree(dir: assetsFontDir, include: 'Operator*.otf').each { it.delete() }
+        fileTree(dir: resFontDir, include: 'operator_mono_*.otf').each { it.delete() }
+
+        slotToFile.each { slot, weightName ->
+            def name = "Operator Mono - ${weightName}"
+            def cacheOtf = new File(cacheDir, "${name}.otf")
+            def cacheTtf = new File(cacheDir, "${name}.ttf")
+            if (!cacheOtf.exists() || cacheOtf.length() == 0) {
+                cacheDir.mkdirs()
+                println ">> downloadFonts: fetching ${name}.otf"
+                def proc = ['gh', 'api', "repos/tsunderick/dotfiles/contents/assets/resources/fonts/${name.replace(' ', '%20')}.otf",
+                            '-H', 'Accept: application/vnd.github.raw'].execute()
+                cacheOtf.withOutputStream { os -> os << proc.in }
+                if (proc.waitFor() != 0 || cacheOtf.length() == 0) {
+                    cacheOtf.delete()
+                    println "WARNING: downloadFonts could not fetch '${name}.otf' via gh"
+                }
+            }
+            // convert CFF -> TrueType (OTS-friendly); skipped when already converted
+            if (cacheOtf.exists() && cacheOtf.length() > 0 && (!cacheTtf.exists() || cacheTtf.length() == 0)) {
+                def proc = ['python3', convertScript.absolutePath, cacheOtf.absolutePath, cacheTtf.absolutePath]
+                        .execute(null, rootProject.projectDir)
+                proc.waitFor()
+                if (cacheTtf.length() == 0) {
+                    cacheTtf.delete()
+                    println "WARNING: downloadFonts: conversion failed for '${name}' (python3/fontTools missing?)"
+                }
+            }
+
+            def src = (cacheTtf.exists() && cacheTtf.length() > 0) ? cacheTtf : fallback
+            def intoAssets = new File(assetsFontDir, "${name}.ttf")
+            def intoRes = new File(resFontDir, "operator_mono_${slot}.ttf")
+            intoAssets.bytes = src.bytes
+            intoRes.bytes = src.bytes
+            println ">> downloadFonts: ${intoAssets.name} / ${intoRes.name} <- ${src.name} (${src.length()} bytes)"
+        }
+    }
+}
+preBuild.dependsOn downloadFonts
+
 dependencies {
     // Testing
     testImplementation 'junit:junit:4.13.2'
@@ -105,6 +170,9 @@ dependencies {
     implementation 'androidx.preference:preference:1.2.0'
     implementation 'androidx.legacy:legacy-preference-v14:1.0.0'
     implementation 'androidx.browser:browser:1.4.0'
+    // tsunderick: WebViewAssetLoader - serves bundled fonts to the preview WebView
+    // over https://appassets.androidplatform.net (file:// subresources are blocked)
+    implementation 'androidx.webkit:webkit:1.11.0'
 
     // Markdown convertor (Flexmark)
     implementation "com.vladsch.flexmark:flexmark:${version_library_flexmark}"
