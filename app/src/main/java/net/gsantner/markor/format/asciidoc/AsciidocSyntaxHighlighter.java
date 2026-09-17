@@ -137,11 +137,11 @@ public class AsciidocSyntaxHighlighter extends SyntaxHighlighterBase {
 
     */
 
-    private static final int TOL_RED = 0xFFEE6677;
+    private static final int TOL_RED = 0xffff8fb1; // tsunderick: accent (heading + admonition)
     // private static final int TOL_YELLOW = 0xFFCCBB44;
     // private static final int TOL_BLUE = 0xFF4477AA;
     // private static final int TOL_GREEN = 0xFF228833;
-    private static final int TOL_CYAN = 0xFF66CCEE;
+    private static final int TOL_CYAN = 0xfff7b3d7; // tsunderick: nvim_cyan sakura (dark link)
     // private static final int TOL_PURPLE = 0xFFAA3377;
     // private static final int TOL_GRAY = 0xFFBBBBBB;
 
@@ -152,42 +152,50 @@ public class AsciidocSyntaxHighlighter extends SyntaxHighlighterBase {
     private static final int TOL_PALE_RED = 0x99FFCCCC;
     private static final int TOL_PALE_GRAY = 0x99DDDDDD;
 
-    private static final int TOL_DARK_BLUE = 0x99222255;
-    private static final int TOL_DARK_CYAN = 0x99225555;
-    private static final int TOL_DARK_GREEN = 0x99225522;
-    private static final int TOL_DARK_YELLOW = 0x99666633;
-    private static final int TOL_DARK_RED = 0x99663333;
-    private static final int TOL_DARK_GRAY = 0x99555555;
+    // tsunderick: dark-variant backgrounds restyled to the OLED sakura palette
+    // (light variants untouched; unused upstream TOL_DARK_* retired)
+    // private static final int TOL_DARK_BLUE = 0x99222255;
+    // private static final int TOL_DARK_CYAN = 0x99225555;
+    // private static final int TOL_DARK_GREEN = 0x99225522;
+    // private static final int TOL_DARK_YELLOW = 0x99666633;
+    // private static final int TOL_DARK_RED = 0x99663333;
+    // private static final int TOL_DARK_GRAY = 0x99555555;
+    private static final int TSUN_DARK_QUOTE = 0x4dff8fb1; // accent
+    private static final int TSUN_DARK_EXAMPLE = 0x4d626583; // selection bg
+    private static final int TSUN_DARK_SIDEBAR = 0x4dff5c8a; // nvim_red
+    private static final int TSUN_DARK_TABLE = 0x4dda9fdc; // orchid
+    private static final int TSUN_DARK_ATTRIBUTE = 0x4df7b3d7; // sakura
+    private static final int TSUN_DARK_GRAY = 0x4d9a8b94; // dusty pink-grey
 
     // Here the concrete use of the colors for AsciiDoc:
     private static final int AD_FORECOLOR_LIGHT_HEADING = TOL_RED;
     private static final int AD_FORECOLOR_DARK_HEADING = TOL_RED;
     // TOL_BLUE link on background (attributes reference, squarebrackets) problematic
     // Test TOL_CYAN, better
-    private static final int AD_FORECOLOR_LIGHT_LINK = TOL_DARK_CYAN;
+    private static final int AD_FORECOLOR_LIGHT_LINK = TOL_CYAN; // tsunderick: sakura (retired TOL_DARK_CYAN; translucent TSUN_* are bg-only)
     private static final int AD_FORECOLOR_DARK_LINK = TOL_CYAN;
     // private static final int AD_FORECOLOR_LIGHT_LIST = TOL_DARK_YELLOW;
     // private static final int AD_FORECOLOR_DARK_LIST = TOL_YELLOW; // OK
     private static final int AD_FORECOLOR_ADMONITION = TOL_RED; // OK
 
     private static final int AD_BACKCOLOR_LIGHT_QUOTE = TOL_PALE_GREEN;
-    private static final int AD_BACKCOLOR_DARK_QUOTE = TOL_DARK_GREEN;
+    private static final int AD_BACKCOLOR_DARK_QUOTE = TSUN_DARK_QUOTE;
     private static final int AD_BACKCOLOR_LIGHT_EXAMPLE = TOL_PALE_BLUE;
-    private static final int AD_BACKCOLOR_DARK_EXAMPLE = TOL_DARK_BLUE;
+    private static final int AD_BACKCOLOR_DARK_EXAMPLE = TSUN_DARK_EXAMPLE;
     private static final int AD_BACKCOLOR_LIGHT_SIDEBAR = TOL_PALE_RED;
-    private static final int AD_BACKCOLOR_DARK_SIDEBAR = TOL_DARK_RED;
+    private static final int AD_BACKCOLOR_DARK_SIDEBAR = TSUN_DARK_SIDEBAR;
     private static final int AD_BACKCOLOR_LIGHT_TABLE = TOL_PALE_YELLOW;
-    private static final int AD_BACKCOLOR_DARK_TABLE = TOL_DARK_YELLOW;
+    private static final int AD_BACKCOLOR_DARK_TABLE = TSUN_DARK_TABLE;
     private static final int AD_BACKCOLOR_LIGHT_ATTRIBUTE = TOL_PALE_CYAN;
-    private static final int AD_BACKCOLOR_DARK_ATTRIBUTE = TOL_DARK_CYAN;
+    private static final int AD_BACKCOLOR_DARK_ATTRIBUTE = TSUN_DARK_ATTRIBUTE;
 
     // We use gray for miscellaneous to avoid too much variety
     private static final int AD_BACKCOLOR_LIGHT_MONOSPACE = TOL_PALE_GRAY;
-    private static final int AD_BACKCOLOR_DARK_MONOSPACE = TOL_DARK_GRAY;
+    private static final int AD_BACKCOLOR_DARK_MONOSPACE = TSUN_DARK_GRAY;
     private static final int AD_BACKCOLOR_LIGHT_SQUAREBRACKETS = TOL_PALE_GRAY;
-    private static final int AD_BACKCOLOR_DARK_SQUAREBRACKETS = TOL_DARK_GRAY;
+    private static final int AD_BACKCOLOR_DARK_SQUAREBRACKETS = TSUN_DARK_GRAY;
     private static final int AD_BACKCOLOR_LIGHT_BLOCKTITLE = TOL_PALE_GRAY;
-    private static final int AD_BACKCOLOR_DARK_BLOCKTITLE = TOL_DARK_GRAY;
+    private static final int AD_BACKCOLOR_DARK_BLOCKTITLE = TSUN_DARK_GRAY;
 
     // Use the same highlight for light and dark theme
     private static final int AD_BACKCOLOR_LIGHT_HIGHLIGHT = 0x80FFFF00; // Yellow

@@ -39,8 +39,12 @@ public class WikitextFileTests {
                     "Created Thursday 24 December 2020\n";
             // TODO: replace logic should not be necessary - find out why time and time zone is not created correctly in the test
             String actual = WikitextActionButtons.createWikitextHeaderAndTitleContents("My_new_wiki_page", date, "Created");
-            String actualReplaced = actual.replaceAll("(?m)T1[78]:00:30.+$", "");
-            String expectedReplaced = expected.replaceAll("(?m)T1[78]:00:30.+$", "");
+            // tsun-markor fork: strip the time+zone portion regardless of its rendered
+            // value — the same instant renders as e.g. T18:00:30+01:00 or T10:00:30-0700
+            // depending on the host's default timezone, so only the date prefix is
+            // deterministic enough to compare
+            String actualReplaced = actual.replaceAll("(?m)T\\d{2}:\\d{2}:\\d{2}.*$", "");
+            String expectedReplaced = expected.replaceAll("(?m)T\\d{2}:\\d{2}:\\d{2}.*$", "");
             assertThat(actualReplaced).isEqualTo(expectedReplaced);
         }
     }

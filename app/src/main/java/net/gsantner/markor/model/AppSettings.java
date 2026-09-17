@@ -17,7 +17,6 @@ import android.util.Pair;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.ColorRes;
-import androidx.annotation.IdRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -716,6 +715,11 @@ public class AppSettings extends GsSharedPreferencesPropertyBackend {
     }
 
     public @ColorInt int getEditorForegroundColor() {
+        // tsunderick: sakura fg on the Black theme (overrides stored scheme pref,
+        // which was seeded once on first start and never picks up palette changes)
+        if (getAppThemeName().contains("black")) {
+            return 0xfff0eaed;
+        }
         final boolean night = GsContextUtils.instance.isDarkModeEnabled(_context);
         return getInt(night ? R.string.pref_key__basic_color_scheme__fg_dark : R.string.pref_key__basic_color_scheme__fg_light, rcolor(R.color.primary_text));
     }
@@ -799,17 +803,7 @@ public class AppSettings extends GsSharedPreferencesPropertyBackend {
         return Arrays.asList(pref.replace("\r", "").replace("\n\n", "\n").split("\n"));
     }
 
-    public @IdRes
-    int getAppStartupTab() {
-        int i = getIntOfStringPref(R.string.pref_key__app_start_tab_v2, R.id.nav_notebook);
-        switch (i) {
-            case 1:
-                return R.id.nav_todo;
-            case 2:
-                return R.id.nav_quicknote;
-        }
-        return R.id.nav_notebook;
-    }
+    // tsun-markor fork: getAppStartupTab() removed along with the Todo/QuickNote bottom bar tabs
 
     public boolean isSwipeToChangeMode() {
         return getBool(R.string.pref_key__swipe_to_change_mode, false);
@@ -1021,6 +1015,21 @@ public class AppSettings extends GsSharedPreferencesPropertyBackend {
 
     public File getFileBrowserLastBrowsedFolder() {
         return new File(getString(R.string.pref_key__file_browser_last_browsed_folder, getNotebookDirectory().getAbsolutePath()));
+    }
+
+    // tsun-markor fork: most recently opened document, drives the bottom bar editor button
+    public void setLastOpenedFile(final File file) {
+        setString(R.string.pref_key__last_opened_file, file != null ? GsFileUtils.getPath(file) : "");
+    }
+
+    /** @return the most recently opened document, or null if none was ever opened / it no longer exists */
+    public File getLastOpenedFile() {
+        final String path = getString(R.string.pref_key__last_opened_file, "");
+        if (path.isEmpty()) {
+            return null;
+        }
+        final File file = new File(path);
+        return file.isFile() ? file : null;
     }
 
     public boolean getSetWebViewFulldrawing(boolean... setValue) {

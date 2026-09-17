@@ -66,7 +66,6 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
     private ViewPager2 _viewPager;
     private SectionsPagerAdapter _sectionsAdapter;
     private GsFileBrowserFragment _notebook;
-    private DocumentEditAndViewFragment _quicknote, _todo;
     private MoreFragment _more;
     private FloatingActionButton _fab;
 
@@ -108,13 +107,18 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         _sectionsAdapter = new SectionsPagerAdapter(getSupportFragmentManager());
         _viewPager.setAdapter(_sectionsAdapter);
         // Keep created fragments alive, but only realize them once the user visits.
-        _viewPager.setOffscreenPageLimit(_bottomNav.getMenu().size());
+        _viewPager.setOffscreenPageLimit(_sectionsAdapter.getItemCount());
         _bottomNav.setOnItemSelectedListener((item) -> {
             final int itemId = item.getItemId();
-            if (itemId == R.id.nav_quicknote) {
-                showLargeFileOpenToastIfNeeded(_appSettings.getQuickNoteFile());
-            } else if (itemId == R.id.nav_todo) {
-                showLargeFileOpenToastIfNeeded(_appSettings.getTodoFile());
+            // tsun-markor fork: switch to the currently open file.
+            // The editor has no pager page of its own; this just opens DocumentActivity.
+            if (itemId == R.id.nav_editor) {
+                final File file = _appSettings.getLastOpenedFile();
+                if (file != null) {
+                    showLargeFileOpenToastIfNeeded(file);
+                    DocumentActivity.launch(MainActivity.this, file, null, null);
+                }
+                return false; // never select: highlight stays on the active page
             }
             final int pos = tabIdToPos(item.getItemId());
             _sectionsAdapter.ensureRealized(pos);
@@ -132,7 +136,11 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         _cu.applySpecialLaunchersVisibility(this, _appSettings.isSpecialFileLaunchersEnabled());
 
         // Determine start folder
-        final File fallback = _appSettings.getFolderToLoadByMenuId(_appSettings.getAppStartupFolderMenuId());
+        // tsun-markor fork: prefer the last browsed folder so the file browser
+        // remembers where we were; fall back to the configured startup folder
+        final File lastBrowsed = _appSettings.getFileBrowserLastBrowsedFolder();
+        final File fallback = GsFileUtils.isDirectory(lastBrowsed)
+                ? lastBrowsed : _appSettings.getFolderToLoadByMenuId(_appSettings.getAppStartupFolderMenuId());
         final Intent intent = getIntent();
         _startFolder = MarkorContextUtils.getValidIntentFile(intent, fallback);
         if (!GsFileUtils.isDirectory(_startFolder)) {
@@ -141,16 +149,6 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         }
         if (!GsFileUtils.isDirectory(_startFolder)) {
             _startFolder = _appSettings.getNotebookDirectory();
-        }
-    }
-
-    @Override
-    public void onActivityFirstTimeVisible() {
-        super.onActivityFirstTimeVisible();
-        // Switch to tab if specific folder _not_ requested, and not recreating from saved instance
-        final int startTab = _appSettings.getAppStartupTab();
-        if (startTab != R.id.nav_notebook && MarkorContextUtils.getValidIntentFile(getIntent(), null) == null) {
-            _viewPager.postDelayed(() -> _viewPager.setCurrentItem(tabIdToPos(startTab)), 100);
         }
     }
 
@@ -168,8 +166,6 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
             final FragmentManager manager = getSupportFragmentManager();
             // Put and get notebook first. Most important for correct operation.
             manager.putFragment(outState, Integer.toString(R.id.nav_notebook), _notebook);
-            manager.putFragment(outState, Integer.toString(R.id.nav_quicknote), _quicknote);
-            manager.putFragment(outState, Integer.toString(R.id.nav_todo), _todo);
             manager.putFragment(outState, Integer.toString(R.id.nav_more), _more);
         } catch (NullPointerException | IllegalStateException ignored) {
             Log.d(MainActivity.class.getName(), "Child fragments null in onSaveInstanceState()");
@@ -188,14 +184,10 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         try {
             final FragmentManager manager = getSupportFragmentManager();
             _notebook = (GsFileBrowserFragment) manager.getFragment(savedInstanceState, Integer.toString(R.id.nav_notebook));
-            _quicknote = (DocumentEditAndViewFragment) manager.getFragment(savedInstanceState, Integer.toString(R.id.nav_quicknote));
-            _todo = (DocumentEditAndViewFragment) manager.getFragment(savedInstanceState, Integer.toString(R.id.nav_todo));
             _more = (MoreFragment) manager.getFragment(savedInstanceState, Integer.toString(R.id.nav_more));
 
             if (_sectionsAdapter != null) {
                 _sectionsAdapter.restoreFragment(tabIdToPos(R.id.nav_notebook));
-                _sectionsAdapter.restoreFragment(tabIdToPos(R.id.nav_quicknote));
-                _sectionsAdapter.restoreFragment(tabIdToPos(R.id.nav_todo));
                 _sectionsAdapter.restoreFragment(tabIdToPos(R.id.nav_more));
             }
 
@@ -233,7 +225,6 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         super.onNewIntent(intent);
         final File file = MarkorContextUtils.getValidIntentFile(intent, null);
         if (_notebook != null && file != null) {
-            hideKeyboard();
             _viewPager.setCurrentItem(tabIdToPos(R.id.nav_notebook), false);
             if (GsFileUtils.isDirectory(file)) {
                 _notebook.getAdapter().setCurrentFolder(file);
@@ -293,6 +284,9 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
 
         // tsun-markor fork: seed bundled sample notes into the notebook (idempotent)
         SeedNotesInstaller.copyIfMissing(this, _appSettings.getNotebookDirectory());
+
+        // Enable the editor button only when there is a file to switch to
+        updateEditorButton();
 
         if (_appSettings.isRecreateMainRequired()) {
             // recreate(); // does not remake fragments
@@ -416,16 +410,20 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         }
     }
 
+    // tsun-markor fork: the pager has 2 pages (Files, More) while the bottom bar has 3 items
+    // (Files, Editor, More). The editor item maps to no page, hence the explicit mapping here.
+    public int getPosCount() {
+        return 2;
+    }
+
     public int tabIdToPos(final int id) {
         if (id == R.id.nav_notebook) return 0;
-        if (id == R.id.nav_todo) return 1;
-        if (id == R.id.nav_quicknote) return 2;
-        if (id == R.id.nav_more) return 3;
-        return 0;
+        if (id == R.id.nav_more) return 1;
+        return -1; // R.id.nav_editor has no pager page
     }
 
     public int tabIdFromPos(final int pos) {
-        return _bottomNav.getMenu().getItem(pos).getItemId();
+        return pos <= 0 ? R.id.nav_notebook : R.id.nav_more;
     }
 
     public int getCurrentPos() {
@@ -434,17 +432,13 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
 
     public String getPosTitle(final int pos) {
         if (pos == 0) return getFileBrowserTitle();
-        if (pos == 1) return getString(R.string.todo);
-        if (pos == 2) return getString(R.string.quicknote);
-        if (pos == 3) return getString(R.string.more);
+        if (pos == 1) return getString(R.string.more);
         return "";
     }
 
     public GsFragmentBase<?, ?> getPosFragment(final int pos) {
         if (pos == 0) return _notebook;
-        if (pos == 1) return _todo;
-        if (pos == 2) return _quicknote;
-        if (pos == 3) return _more;
+        if (pos == 1) return _more;
         return null;
     }
 
@@ -459,24 +453,22 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
         }
     }
 
-    public void hideKeyboard() {
-        if (_quicknote != null) {
-            _cu.showSoftKeyboard(this, false, _quicknote.getEditor());
-        }
-        if (_todo != null) {
-            _cu.showSoftKeyboard(this, false, _todo.getEditor());
+    // tsun-markor fork: the editor button is only usable with a remembered (existing) file
+    private void updateEditorButton() {
+        final MenuItem editor = _bottomNav.getMenu().findItem(R.id.nav_editor);
+        if (editor != null) {
+            editor.setEnabled(_appSettings.getLastOpenedFile() != null);
         }
     }
 
     public void onViewPagerPageSelected(final int pos) {
-        _bottomNav.getMenu().getItem(pos).setChecked(true);
+        _bottomNav.getMenu().findItem(tabIdFromPos(pos)).setChecked(true);
         if (_sectionsAdapter != null) {
             _sectionsAdapter.ensureRealized(pos);
         }
 
         if (pos == tabIdToPos(R.id.nav_notebook)) {
             _fab.show();
-            hideKeyboard();
         } else {
             _fab.hide();
         }
@@ -530,8 +522,7 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
 
         SectionsPagerAdapter(FragmentManager fragMgr) {
             super(fragMgr, MainActivity.this.getLifecycle());
-            final int count = _bottomNav.getMenu().size();
-            _realized = new boolean[count];
+            _realized = new boolean[getPosCount()];
             _realized[_viewPager.getCurrentItem()] = true; // only the visible page is real at start
         }
 
@@ -543,11 +534,7 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
             }
             final GsFragmentBase<?, ?> frag;
             final int id = tabIdFromPos(pos);
-            if (id == R.id.nav_quicknote) {
-                frag = _quicknote = DocumentEditAndViewFragment.newInstance(new Document(_appSettings.getQuickNoteFile()), -1, false);
-            } else if (id == R.id.nav_todo) {
-                frag = _todo = DocumentEditAndViewFragment.newInstance(new Document(_appSettings.getTodoFile()), -1, false);
-            } else if (id == R.id.nav_more) {
+            if (id == R.id.nav_more) {
                 frag = _more = MoreFragment.newInstance();
             } else {
                 frag = _notebook = GsFileBrowserFragment.newInstance();
@@ -558,7 +545,7 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
 
         @Override
         public int getItemCount() {
-            return _bottomNav.getMenu().size();
+            return getPosCount();
         }
 
         @Override

@@ -17,14 +17,9 @@
         android:title="@string/files" />
 
     <item
-        android:id="@+id/nav_todo"
-        android:icon="@drawable/ic_assignment_turned_in_black_24dp"
-        android:title="@string/todo" />
-
-    <item
-        android:id="@+id/nav_quicknote"
-        android:icon="@drawable/ic_lightning_black_24dp"
-        android:title="@string/quicknote" />
+        android:id="@+id/nav_editor"
+        android:icon="@drawable/ic_edit_black_24dp"
+        android:title="@string/editor" />
 
     <item
         android:id="@+id/nav_more"

@@ -52,17 +52,18 @@ public class WikitextSyntaxHighlighter extends SyntaxHighlighterBase {
     public static final int CHECKBOX_RIGHT_BRACKET_GROUP = 4;
 
     public static class Colors {
-        private static final int COLOR_HEADING = 0xff4e9a06;
-        private static final int HIGHLIGHT_BACKGROUND_COLOR = 0xffFFA062;   // zim original color: 0xffffff00
-        private static final int UNORDERED_LIST_BULLET_COLOR = 0xffdaa521;
+        // tsunderick: OLED sakura palette (see ~/.config/omarchy/themes/tsunderick/colors.toml)
+        private static final int COLOR_HEADING = 0xffff8fb1; // accent
+        private static final int HIGHLIGHT_BACKGROUND_COLOR = 0x66ff8fb1;   // translucent accent
+        private static final int UNORDERED_LIST_BULLET_COLOR = 0xffda9fdc; // nvim_muted orchid
         private static final int CHECKLIST_BASE_COLOR = UNORDERED_LIST_BULLET_COLOR;
         private static final int CHECKLIST_ARROW_COLOR = CHECKLIST_BASE_COLOR;
-        private static final int ORDERED_LIST_NUMBER_COLOR = 0xffdaa521;
-        private static final int LINK_COLOR = 0xff1ea3fd; // zim original color: 0xff0000ff
-        private static final int CHECKLIST_CHECKED_COLOR = 0xff54a309;
-        private static final int CHECKLIST_CROSSED_COLOR = 0xffa90000;
+        private static final int ORDERED_LIST_NUMBER_COLOR = 0xffda9fdc; // orchid
+        private static final int LINK_COLOR = 0xffff7aa0; // nvim_bright_red
+        private static final int CHECKLIST_CHECKED_COLOR = 0xffa7abde; // nvim_green periwinkle
+        private static final int CHECKLIST_CROSSED_COLOR = 0xffff5c8a; // nvim_red
         private static final int ZIMHEADER_COLOR = 0xff808080;
-        private static final int CODEBLOCK_COLOR = 0xff8c8c8c;
+        private static final int CODEBLOCK_COLOR = 0xff111111; // matches preview code bg
     }
 
     //
@@ -136,7 +137,7 @@ public class WikitextSyntaxHighlighter extends SyntaxHighlighterBase {
     }
 
     private void createCheckboxSpansForAllCheckStates() {
-        createCheckboxSpanWithDifferentColors(CHECKLIST_UNCHECKED, 0xffffffff);
+        createCheckboxSpanWithDifferentColors(CHECKLIST_UNCHECKED, 0xfff0eaed);
         createCheckboxSpanWithDifferentColors(CHECKLIST_CHECKED, Colors.CHECKLIST_CHECKED_COLOR);
         createCheckboxSpanWithDifferentColors(CHECKLIST_CROSSED, Colors.CHECKLIST_CROSSED_COLOR);
         createCheckboxSpanWithDifferentColors(CHECKLIST_RIGHT_ARROW, Colors.CHECKLIST_ARROW_COLOR);

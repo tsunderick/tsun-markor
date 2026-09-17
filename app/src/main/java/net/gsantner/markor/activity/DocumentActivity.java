@@ -16,6 +16,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Html;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -53,7 +54,9 @@ public class DocumentActivity extends MarkorBaseActivity {
         final File file = (File) intent.getSerializableExtra(Document.EXTRA_FILE);
         final Integer lineNumber = intent.hasExtra(Document.EXTRA_FILE_LINE_NUMBER) ? intent.getIntExtra(Document.EXTRA_FILE_LINE_NUMBER, -1) : null;
         final Boolean doPreview = intent.hasExtra(Document.EXTRA_DO_PREVIEW) ? intent.getBooleanExtra(Document.EXTRA_DO_PREVIEW, false) : null;
-        launch(activity, file, doPreview, lineNumber);
+        // tsun-markor fork: Obsidian wikilink heading anchor, e.g. tapping file:///note.md#heading
+        final String fragmentId = intent.hasExtra(Document.EXTRA_FRAGMENT_ID) ? intent.getStringExtra(Document.EXTRA_FRAGMENT_ID) : null;
+        launch(activity, file, doPreview, lineNumber, false, fragmentId);
     }
 
     public static void launch(final Activity activity, final Uri uri) {
@@ -73,12 +76,34 @@ public class DocumentActivity extends MarkorBaseActivity {
         launch(activity, file, doPreview, lineNumber, false);
     }
 
+    /** tsun-markor fork: launch with a heading anchor to scroll to in the preview. */
+    public static void launch(
+            final Activity activity,
+            final File file,
+            final Boolean doPreview,
+            final Integer lineNumber,
+            final String fragmentId
+    ) {
+        launch(activity, file, doPreview, lineNumber, false, fragmentId);
+    }
+
     private static void launch(
             final Activity activity,
             final File file,
             final Boolean doPreview,
             final Integer lineNumber,
             final boolean forceOpenInThisApp
+    ) {
+        launch(activity, file, doPreview, lineNumber, forceOpenInThisApp, null);
+    }
+
+    private static void launch(
+            final Activity activity,
+            final File file,
+            final Boolean doPreview,
+            final Integer lineNumber,
+            final boolean forceOpenInThisApp,
+            final String fragmentId
     ) {
         if (activity == null || file == null) {
             return;
@@ -116,6 +141,11 @@ public class DocumentActivity extends MarkorBaseActivity {
 
             if (lineNumber != null) {
                 intent.putExtra(Document.EXTRA_FILE_LINE_NUMBER, lineNumber);
+            }
+
+            // tsun-markor fork: carry the wikilink heading anchor through to the fragment
+            if (fragmentId != null && !fragmentId.trim().isEmpty()) {
+                intent.putExtra(Document.EXTRA_FRAGMENT_ID, fragmentId.trim());
             }
 
             if (doPreview != null) {
@@ -195,6 +225,9 @@ public class DocumentActivity extends MarkorBaseActivity {
         } else {
             // Open in editor/viewer
             final Document doc = new Document(file);
+            // tsun-markor fork: remember this as the most recently opened document
+            // (drives the editor button in MainActivity's bottom bar)
+            _appSettings.setLastOpenedFile(doc.file);
             final Integer startLine;
             if (intent.hasExtra(Document.EXTRA_FILE_LINE_NUMBER)) {
                 startLine = intent.getIntExtra(Document.EXTRA_FILE_LINE_NUMBER, -1);
@@ -212,6 +245,10 @@ public class DocumentActivity extends MarkorBaseActivity {
                 startInPreview = null;
             }
 
+            // tsun-markor fork: Obsidian wikilink heading anchor ([[Note#Heading]])
+            final String jumpAnchor = intent.hasExtra(Document.EXTRA_FRAGMENT_ID)
+                    ? intent.getStringExtra(Document.EXTRA_FRAGMENT_ID) : null;
+
             // Three cases
             // 1. We have an editor open and it is the same document - show the requested line
             // 2. We have an editor open and it is a different document - open the new document
@@ -224,18 +261,21 @@ public class DocumentActivity extends MarkorBaseActivity {
                         if (startLine != null) {
                             // Same document requested, show the requested line
                             TextViewUtils.selectLines(editFrag.getEditor(), startLine);
+                        } else if (jumpAnchor != null) {
+                            // tsun-markor fork: same document, jump to the heading anchor
+                            editFrag.jumpToAnchorPreview(jumpAnchor);
                         }
                     } else {
                         // Current document is different - launch the new document
-                        launch(this, file, startInPreview, startLine);
+                        launch(this, file, startInPreview, startLine, false, jumpAnchor);
                     }
                 } else {
                     // Current fragment is not an editor - launch the new document
-                    launch(this, file, startInPreview, startLine);
+                    launch(this, file, startInPreview, startLine, false, jumpAnchor);
                 }
             } else {
                 // No fragment open - open the document
-                showFragment(DocumentEditAndViewFragment.newInstance(doc, startLine, startInPreview));
+                showFragment(DocumentEditAndViewFragment.newInstance(doc, startLine, startInPreview, jumpAnchor));
             }
         }
     }
@@ -255,6 +295,14 @@ public class DocumentActivity extends MarkorBaseActivity {
             final Integer lineNumber = parseNormalizedLine(uri);
             if (lineNumber != null) {
                 intent.putExtra(Document.EXTRA_FILE_LINE_NUMBER, lineNumber);
+            }
+        }
+
+        // tsun-markor fork: file:///note.md#heading tapped in the preview — keep the anchor
+        if (!intent.hasExtra(Document.EXTRA_FRAGMENT_ID) && uri != null) {
+            final String fragment = uri.getFragment();
+            if (!TextUtils.isEmpty(fragment)) {
+                intent.putExtra(Document.EXTRA_FRAGMENT_ID, fragment);
             }
         }
 

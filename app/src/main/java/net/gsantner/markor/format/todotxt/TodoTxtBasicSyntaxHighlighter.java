@@ -7,14 +7,16 @@ import net.gsantner.markor.model.AppSettings;
 
 public class TodoTxtBasicSyntaxHighlighter extends SyntaxHighlighterBase {
 
-    private final static int COLOR_CATEGORY = 0xffef6C00;
-    private final static int COLOR_CONTEXT = 0xff88b04b;
+    // tsunderick: OLED sakura palette (see ~/.config/omarchy/themes/tsunderick/colors.toml)
+    private final static int COLOR_CATEGORY = 0xfff7b3d7; // nvim_cyan sakura (projects)
+    private final static int COLOR_CONTEXT = 0xffda9fdc; // nvim_muted orchid
 
-    private final static int COLOR_PRIORITY_A = 0xffEF2929;
-    private final static int COLOR_PRIORITY_B = 0xffd16900;
-    private final static int COLOR_PRIORITY_C = 0xff59a112;
-    private final static int COLOR_PRIORITY_D = 0xff0091c2;
-    private final static int COLOR_PRIORITY_E = 0xffa952cb;
+    // Priorities: hue spread within the pink family, A hottest → E coolest
+    private final static int COLOR_PRIORITY_A = 0xffff5c8a; // nvim_red
+    private final static int COLOR_PRIORITY_B = 0xffff8fb1; // accent
+    private final static int COLOR_PRIORITY_C = 0xfff7b3d7; // nvim_cyan sakura
+    private final static int COLOR_PRIORITY_D = 0xffdcc1eb; // nvim_blue lilac
+    private final static int COLOR_PRIORITY_E = 0xffa7abde; // nvim_green periwinkle
     private final static int COLOR_PRIORITY_F = 0xff878986;
 
     private final static int COLOR_DONE_DARK = 0x999d9d9d;

@@ -57,7 +57,9 @@ public abstract class TextConverterBase {
     protected static final String TOKEN_FILEURI_VIEWED_FILE = "{{ app.fileuri_viewed_file }}";
 
     protected static final String HTML_DOCTYPE = "<!DOCTYPE html>";
-    protected static final String HTML001_HEAD_WITH_BASESTYLE = "<html lang='" + TOKEN_POST_LANG + "'><head><meta charset='UTF-8'>" + CSS_S + "html,body{padding:4px 8px 4px 8px;font-family:'" + TOKEN_FONT + "';}h1,h2,h3,h4,h5,h6{font-family:'sans-serif-condensed';}a{color: " + TOKEN_LINK_COLOR + ";text-decoration:underline;}img{height:auto;max-width:100%;max-height: 90vh;margin:auto;}" + CSS_E;
+    // tsunderick: never let the page itself scroll horizontally (a wide table used to
+    // widen the whole document); wide tables scroll within their own box instead
+    protected static final String HTML001_HEAD_WITH_BASESTYLE = "<html lang='" + TOKEN_POST_LANG + "'><head><meta charset='UTF-8'>" + CSS_S + "html,body{padding:4px 8px 4px 8px;font-family:'" + TOKEN_FONT + "';}h1,h2,h3,h4,h5,h6{font-family:'sans-serif-condensed';}a{color: " + TOKEN_LINK_COLOR + ";text-decoration:underline;}img{height:auto;max-width:100%;max-height: 90vh;margin:auto;}html,body{overflow-x:hidden;}table{display:block;overflow-x:auto;}" + CSS_E;
     protected static final String HTML002_HEAD_WITH_STYLE_LIGHT = CSS_S + "html,body{color:#303030;}blockquote{color:#73747d;}" + CSS_E;
     // tsunderick: OLED dark style - pure black, warm white text, sakura accents
     protected static final String HTML002_HEAD_WITH_STYLE_DARK = CSS_S + "html,body{color:#f0eaed;background-color:#000000;}a:link,a:visited{color:#ff8fb1;}blockquote{color:#da9fdc;border-left:3px solid #ff8fb1;padding-left:8px;margin-left:0;margin-right:0;}code,pre{background-color:#111111;}" + CSS_E;
@@ -104,6 +106,24 @@ public abstract class TextConverterBase {
             final boolean lightMode,
             final boolean lineNum
     ) {
+        convertMarkupShowInWebView(document, content, context, webView, lightMode, lineNum, null);
+    }
+
+    /**
+     * tsun-markor fork: same as above, with an optional element id to scroll to
+     * once the page has loaded (used by Obsidian wikilink heading anchors).
+     *
+     * @param jumpToAnchorId element id to jump to after load, or null
+     */
+    public void convertMarkupShowInWebView(
+            final Document document,
+            final String content,
+            final Activity context,
+            final WebView webView,
+            final boolean lightMode,
+            final boolean lineNum,
+            final String jumpToAnchorId
+    ) {
         final AppSettings as = AppSettings.get(context);
 
         String html;
@@ -111,6 +131,10 @@ public abstract class TextConverterBase {
             html = convertMarkup(content, context, lightMode, lineNum, document.file);
         } catch (Exception e) {
             html = "Please report at project issue tracker: " + e;
+        }
+
+        if (jumpToAnchorId != null && !jumpToAnchorId.trim().isEmpty()) {
+            html = injectJumpToAnchor(html, jumpToAnchorId.trim());
         }
 
         String parent = document.file.getParent();
@@ -126,6 +150,25 @@ public abstract class TextConverterBase {
         for (int i = (html.contains(TOKEN_TEXT_CONVERTER_MAX_ZOOM_OUT_BY_DEFAULT) ? 0 : 99); i < 30; i++) {
             webView.postDelayed(webView::zoomOut, 210 * (i < 5 ? 1 : (i < 10 ? 2 : (i < 15 ? 3 : (i < 20 ? 5 : 9)))));
         }
+    }
+
+    /**
+     * tsun-markor fork: append a script that scrolls the given element id into
+     * view on window load. The id is tried as-is and URL-decoded (fragments may
+     * arrive percent-encoded from the WebView).
+     */
+    private static String injectJumpToAnchor(final String html, final String anchorId) {
+        final String idJson = anchorId.replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"");
+        final String script = "<script>window.addEventListener('load',function(){try{"
+                + "var t='" + idJson + "';"
+                + "var e=document.getElementById(t)||document.getElementById(decodeURIComponent(t));"
+                + "if(e){e.scrollIntoView();}"
+                + "}catch(err){}});</script>";
+        final int bodyEnd = html.lastIndexOf("</body>");
+        if (bodyEnd >= 0) {
+            return html.substring(0, bodyEnd) + script + html.substring(bodyEnd);
+        }
+        return html + script;
     }
 
     /**

@@ -85,10 +85,17 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
     public static final String FRAGMENT_TAG = "DocumentEditAndViewFragment";
     public static final String SAVESTATE_DOCUMENT = "DOCUMENT";
     public static final String START_PREVIEW = "START_PREVIEW";
+    // tsun-markor fork: Obsidian wikilink heading anchor ([[Note#Heading]])
+    public static final String START_JUMP_ANCHOR = "START_JUMP_ANCHOR";
 
     public static float VIEW_FONT_SCALE = 100f / 15.7f;
 
     public static DocumentEditAndViewFragment newInstance(final @NonNull Document document, final Integer lineNumber, final Boolean preview) {
+        return newInstance(document, lineNumber, preview, null);
+    }
+
+    /** tsun-markor fork: launch with a heading anchor (element id) to scroll to in the preview. */
+    public static DocumentEditAndViewFragment newInstance(final @NonNull Document document, final Integer lineNumber, final Boolean preview, final String jumpAnchor) {
         DocumentEditAndViewFragment f = new DocumentEditAndViewFragment();
         Bundle args = new Bundle();
         args.putSerializable(Document.EXTRA_DOCUMENT, document);
@@ -97,6 +104,9 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
         }
         if (preview != null) {
             args.putBoolean(START_PREVIEW, preview);
+        }
+        if (jumpAnchor != null && !jumpAnchor.trim().isEmpty()) {
+            args.putString(START_JUMP_ANCHOR, jumpAnchor.trim());
         }
         f.setArguments(args);
         return f;
@@ -122,6 +132,8 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
     private MenuItem _saveMenuItem, _undoMenuItem, _redoMenuItem;
     private boolean _isPreviewVisible;
     private boolean _nextConvertToPrintMode = false;
+    // tsun-markor fork: heading anchor to scroll to on the next preview render, consumed once
+    private String _pendingJumpAnchor;
 
     public DocumentEditAndViewFragment() {
         super();
@@ -135,6 +147,10 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
             _document = (Document) savedInstanceState.getSerializable(SAVESTATE_DOCUMENT);
         } else if (args != null && args.containsKey(Document.EXTRA_DOCUMENT)) {
             _document = (Document) args.get(Document.EXTRA_DOCUMENT);
+        }
+        // tsun-markor fork: wikilink heading anchor ([[Note#Heading]]), consumed on first preview render
+        if (args != null) {
+            _pendingJumpAnchor = args.getString(START_JUMP_ANCHOR, null);
         }
     }
 
@@ -288,7 +304,13 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
             final int lastViewHeight = _appSettings.getLastViewHeight(_document.path, 0);
             final int lastViewScrollY = _appSettings.getLastViewScrollY(_document.path, 0);
             if (lastViewScrollY > 0 && lastViewHeight == _webView.getHeight()) {
-                _verticalScrollView.post(() -> _webView.scrollTo(0, lastViewScrollY));
+                _verticalScrollView.post(() -> {
+                    _webView.scrollTo(0, lastViewScrollY);
+                    // tsun-markor fork: the restore jump is not user scrolling
+                    if (_barAutoHideHelper != null) {
+                        _barAutoHideHelper.resyncScrollBaseline();
+                    }
+                });
             }
         }
 
@@ -301,6 +323,10 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
                     final int lastEditScrollY = _appSettings.getLastEditScrollY(_document.path, 0);
                     _hlEditor.setSelection(targetSelection);
                     _verticalScrollView.scrollTo(0, lastEditScrollY);
+                    // tsun-markor fork: the restore jump is not user scrolling
+                    if (_barAutoHideHelper != null) {
+                        _barAutoHideHelper.resyncScrollBaseline();
+                    }
                     return;
                 }
             }
@@ -1169,11 +1195,45 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
         if (_webView == null) {
             return;
         }
+        // tsun-markor fork: consume a pending wikilink heading anchor ([[Note#Heading]]) on this render
+        final String jumpAnchor = _pendingJumpAnchor;
+        _pendingJumpAnchor = null;
         // Don't let text to view mode crash app
         try {
-            _format.getConverter().convertMarkupShowInWebView(_document, getTextString(), getActivity(), _webView, _nextConvertToPrintMode, _lineNumbersView.isLineNumbersEnabled());
+            _format.getConverter().convertMarkupShowInWebView(_document, getTextString(), getActivity(), _webView, _nextConvertToPrintMode, _lineNumbersView.isLineNumbersEnabled(), jumpAnchor);
         } catch (OutOfMemoryError e) {
             _format.getConverter().convertMarkupShowInWebView(_document, "updateViewModeText getTextString(): OutOfMemory  " + e, getActivity(), _webView, _nextConvertToPrintMode, _lineNumbersView.isLineNumbersEnabled());
+        }
+    }
+
+    /** tsun-markor fork: re-anchor auto-hiding bars after a programmatic scroll (e.g. TOC jump). */
+    public void resyncBars() {
+        if (_barAutoHideHelper != null) {
+            _barAutoHideHelper.resyncScrollBaseline();
+        }
+    }
+
+    /**
+     * tsun-markor fork: scroll the preview to the given element id (Obsidian
+     * wikilink heading anchor). No-op when the preview is not visible.
+     */
+    public void jumpToAnchorPreview(final String anchorId) {
+        if (anchorId == null || anchorId.trim().isEmpty() || !_isPreviewVisible || _webView == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            final String id = anchorId.trim()
+                    .replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"");
+            final String js = "(function(){try{var e=document.getElementById('" + id + "')||document.getElementById(decodeURIComponent('" + id + "'));if(e){e.scrollIntoView();}}catch(err){}})();";
+            _webView.evaluateJavascript(js, null);
+            // tsun-markor fork: the jump is not user scrolling — re-anchor the bars
+            if (_barAutoHideHelper != null) {
+                _webView.postDelayed(() -> {
+                    if (_barAutoHideHelper != null) {
+                        _barAutoHideHelper.resyncScrollBaseline();
+                    }
+                }, 200);
+            }
         }
     }
 

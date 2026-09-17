@@ -1,6 +1,5 @@
 package net.gsantner.markor.format.orgmode;
 
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 
@@ -23,11 +22,13 @@ public class OrgmodeSyntaxHighlighter extends SyntaxHighlighterBase {
     public final static Pattern LIST_UNORDERED = Pattern.compile("(\\n|^)\\s{0,16}([+-])( \\[[ X]\\])?(?= )");
     public final static Pattern LIST_ORDERED = Pattern.compile("(?m)^\\s{0,16}(\\d+)(:?\\.|\\))\\s");
     public final static Pattern LINK = Pattern.compile("\\[\\[.*?]]|<.*?>|https?://\\S+|\\[.*?]\\[.*?]|\\[.*?]\n");
-    private static final int ORG_COLOR_HEADING = 0xffef6D00;
-    private static final int ORG_COLOR_LINK = 0xff1ea3fe;
-    private static final int ORG_COLOR_LIST = 0xffdaa521;
+    // tsunderick: OLED sakura palette (see ~/.config/omarchy/themes/tsunderick/colors.toml)
+    private static final int ORG_COLOR_HEADING = 0xffff8fb1; // accent
+    private static final int ORG_COLOR_LINK = 0xffff7aa0; // nvim_bright_red
+    private static final int ORG_COLOR_LIST = 0xffda9fdc; // nvim_muted orchid
     private static final int ORG_COLOR_DIM = 0xff8c8c8c;
-    private static final int ORG_COLOR_BLOCK = 0xdddddddd;
+    private static final int ORG_COLOR_BLOCK = 0x33626583; // translucent selection bg
+    private static final int ORG_COLOR_UNDERLINE = 0xffff8fb1; // accent (black was invisible on OLED)
 
     public OrgmodeSyntaxHighlighter(AppSettings as) {
         super(as);
@@ -55,7 +56,7 @@ public class OrgmodeSyntaxHighlighter extends SyntaxHighlighterBase {
         createStyleSpanForMatches(BOLD, Typeface.BOLD);
         createStyleSpanForMatches(ITALICS, Typeface.ITALIC);
         createStrikeThroughSpanForMatches(STRIKETHROUGH);
-        createColoredUnderlineSpanForMatches(UNDERLINE, Color.BLACK);
+        createColoredUnderlineSpanForMatches(UNDERLINE, ORG_COLOR_UNDERLINE);
         createMonospaceSpanForMatches(CODE_INLINE);
     }
 

@@ -44,15 +44,7 @@
                 android:key="@string/pref_key__exts_to_always_open_in_this_app"
                 android:title="@string/always_open_with_this_app" />
 
-            <ListPreference
-                android:defaultValue="0"
-                android:dialogTitle="@string/app_start_tab"
-                android:entries="@array/pref_arrdisp__bottomnav"
-                android:entryValues="@array/pref_arrkeys__zero_to_three"
-                android:icon="@drawable/ic_file_gray_24dp"
-                android:key="@string/pref_key__app_start_tab_v2"
-                android:summary="%1$s"
-                android:title="@string/app_start_tab" />
+            <!-- tsun-markor fork: "App start tab" removed; the app now starts on the Files page -->
 
             <ListPreference
                 android:defaultValue="notebook"

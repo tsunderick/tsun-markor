@@ -8,12 +8,15 @@
 package net.gsantner.markor.format.markdown;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
 import android.text.Editable;
 import android.view.KeyEvent;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.StringRes;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentActivity;
 
 import net.gsantner.markor.R;
 import net.gsantner.markor.activity.DocumentActivity;
@@ -279,10 +282,74 @@ public class MarkdownActionButtons extends ActionButtonBase {
 
     }
 
+    /**
+     * tsun-markor fork: extract an Obsidian wikilink ([[target]], [[target|alias]],
+     * [[target#Heading]]) containing the given cursor position, if any. The returned
+     * link's target is the bare wikilink target, and link carries "<target>[#<anchor>]".
+     */
+    private Link extractWikiLink(final CharSequence text, final int pos) {
+        final int[] sel = TextViewUtils.getLineSelection(text, pos);
+        if (sel[0] != -1 && sel[1] != -1) {
+            final String line = text.subSequence(sel[0], sel[1]).toString();
+            final Matcher m = MarkdownSyntaxHighlighter.WIKI_LINK.matcher(line);
+
+            while (m.find()) {
+                final int start = m.start() + sel[0], end = m.end() + sel[0];
+                if (start <= pos && end >= pos) {
+                    final String[] parts = ObsidianWikiLinkResolver.extractTargetAndAnchor(m.group());
+                    final String target = parts[0];
+                    final String anchor = parts[1];
+                    if (!target.isEmpty() || !anchor.isEmpty()) {
+                        return new Link(target, target + (anchor.isEmpty() ? "" : "#" + anchor), false, start, end);
+                    }
+                    return new Link("", "", false, -1, -1);
+                }
+            }
+        }
+
+        return new Link("", "", false, -1, -1);
+    }
+
+    /** tsun-markor fork: scroll the visible preview to a heading anchor element id. */
+    private void jumpPreviewToAnchor(final String slug) {
+        final Activity activity = getActivity();
+        if (activity == null || slug == null || slug.isEmpty()) {
+            return;
+        }
+        for (final Fragment frag : ((FragmentActivity) activity).getSupportFragmentManager().getFragments()) {
+            if (frag instanceof DocumentEditAndViewFragment) {
+                ((DocumentEditAndViewFragment) frag).jumpToAnchorPreview(slug);
+                return;
+            }
+        }
+    }
+
     private boolean followLinkUnderCursor() {
         final int sel = TextViewUtils.getSelection(_hlEditor)[0];
         if (sel < 0) {
             return false;
+        }
+
+        // tsun-markor fork: Obsidian wikilinks resolve vault-wide before falling
+        // back to the plain markdown link handling below
+        final Link wikiLink = extractWikiLink(_hlEditor.getText(), sel);
+        if (wikiLink.isValid()) {
+            final int hash = wikiLink.link.indexOf('#');
+            final String target = hash >= 0 ? wikiLink.link.substring(0, hash) : wikiLink.link;
+            final String anchor = hash >= 0 ? wikiLink.link.substring(hash + 1) : "";
+            final String slug = ObsidianWikiLinkResolver.slugifyHeading(anchor);
+
+            if (target.isEmpty() && !slug.isEmpty()) {
+                // Same-page anchor [[#Heading]]: jump within the open preview
+                jumpPreviewToAnchor(slug);
+                return true;
+            }
+
+            final File f = ObsidianWikiLinkResolver.resolve(_appSettings.getNotebookDirectory(), _document.file, target);
+            if (f != null && (GsFileUtils.isDirectory(f) || f.isFile() || GsFileUtils.canCreate(f))) {
+                DocumentActivity.launch(getActivity(), f, null, null, slug.isEmpty() ? null : slug);
+                return true;
+            }
         }
 
         final Link link = Link.extract(_hlEditor.getText(), sel);

@@ -408,6 +408,8 @@ work. If not, see <https://creativecommons.org/publicdomain/zero/1.0/>.
     <string name="pref_key__new_file_dialog_lastused_extension" translatable="false">pref_key__new_file_dialog_lastused_extension</string>
     <string name="pref_key__new_file_dialog_lastused_type" translatable="false">pref_key__new_file_dialog_lastused_type</string>
     <string name="pref_key__file_browser_last_browsed_folder" translatable="false">pref_key__file_browser_last_browsed_folder</string>
+    <!-- tsun-markor fork: path of the most recently opened document, for the bottom bar editor button -->
+    <string name="pref_key__last_opened_file" translatable="false">pref_key__last_opened_file</string>
     <string name="pref_key__file_description_format" translatable="false">pref_key__file_description_format</string>
     <string name="pref_key__wikitext_bigger_headings" translatable="false">pref_key__wikitext_bigger_headings</string>
     <string name="pref_key__asciidoc_bigger_headings" translatable="false">pref_key__asciidoc_bigger_headings</string>

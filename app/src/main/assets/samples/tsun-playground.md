@@ -27,9 +27,12 @@ That is the contract.
 
 1. Open it in the editor — the text should render in Operator Mono.
 2. Scroll — the bars should hide and reappear.
-3. Toggle the preview (eye icon) — bold and italics should render as *true*
-   Operator Mono Bold and Operator Mono Italic, not synthesized substitutes.
-4. Open the keyboard in edit mode — the top bar should hide while typing.
+3. Look at the emphasis below **in this editor** — italics are the cursive
+   Operator Mono Italic, bold the true Bold, `***both***` the true Bold Italic
+   (no synthetic skew/fake-bold).
+4. Toggle the preview (eye icon) — bold and italics render the same true
+   faces there via @font-face injection.
+5. Open the keyboard in edit mode — the top bar should hide while typing.
 
 ---
 
@@ -254,7 +257,33 @@ bare www.example.com paths in some.
 
 ---
 
-## 8. Conclusion
+## 8. Obsidian wikilinks
+
+This fork understands Obsidian-style `[[wikilinks]]` in Markdown — they
+display their alias and open the linked note when tapped in the preview
+(or via the open-link action in the editor). Targets resolve Obsidian-style:
+notebook-root-relative first, then vault-wide by note name.
+
+### 8.1 The forms
+
+- Plain: [[Unique]] — no such note in this notebook, so tapping it offers creating one
+- Aliased: [[Unique|the display text wins]]
+- Aliased again: [[Unique|another alias]] — two links to the same target
+- Cross-page anchor: [[Unique#Some Heading|opens Unique and jumps to the heading]]
+- Same-page anchor: [[#8. Obsidian wikilinks]] — jumps back up to this very section
+
+> These point at a note named `Unique.md`; create it anywhere in the
+> notebook and the links light up.
+
+### 8.2 Known limits
+
+- `![[embeds]]` are left untouched (deliberately, for now)
+- Duplicate headings anchor to the first occurrence
+- `[[links]]` inside fenced code blocks stay inert — on purpose
+
+---
+
+## 9. Conclusion
 
 If you have scrolled this far:
 

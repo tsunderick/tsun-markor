@@ -51,6 +51,8 @@ public class Document implements Serializable {
     public static final String EXTRA_DOCUMENT = "EXTRA_DOCUMENT"; // Document
     public static final String EXTRA_FILE = "EXTRA_FILE"; // java.io.File
     public static final String EXTRA_FILE_LINE_NUMBER = "EXTRA_FILE_LINE_NUMBER"; // int
+    // tsun-markor fork: Obsidian wikilink heading anchor ([[Note#Heading]]) — element id to scroll to in the preview
+    public static final String EXTRA_FRAGMENT_ID = "EXTRA_FRAGMENT_ID"; // String
     public static final String EXTRA_DO_PREVIEW = "EXTRA_DO_PREVIEW";
 
     // Exposed properties

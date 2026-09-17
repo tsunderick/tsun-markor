@@ -37,13 +37,17 @@ import net.gsantner.opoc.format.GsTextUtils;
 import net.gsantner.opoc.util.GsContextUtils;
 import net.gsantner.opoc.wrapper.GsCallback;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableSet;
+import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -100,6 +104,78 @@ public abstract class SyntaxHighlighterBase {
      * Url pattern with required http/https protocol. Case-sensitive.
      */
     public static final Pattern URL = Pattern.compile("\\bhttps?://(?:(?:[-;:&=+$,\\w]+@)?[A-Za-z0-9.-]+|(?:www\\.|[-;:&=+$,\\w]+@)[A-Za-z0-9.-]+)(?:/[+~%/.\\w_-]*\\??[-+=&;%@.\\w_]*#?[.!/\\\\\\w]*)?");
+
+    //#################### tsun-markor fork: true bold/italic font faces ####################
+    // Bold/italic emphasis is rendered with real font faces (e.g. the cursive Operator
+    // Mono Italic) instead of the synthetic TextPaint skew / fake-bold, whenever the
+    // configured font ships matching sibling variant files. Falls back to the old
+    // behavior for fonts without variants.
+
+    private static final String ASSET_PREFIX = "/android_asset/";
+
+    /** Successfully loaded variant faces, keyed by absolute path. */
+    private static final Map<String, Typeface> FACE_CACHE = new ConcurrentHashMap<>();
+
+    /** Paths which were checked and have no loadable variant — negative cache. */
+    private static final Set<String> FACE_MISSING = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
+    /**
+     * Derive the file path of a bold/italic variant of a font file, following the
+     * sibling naming convention also used by the preview ({@code TextConverterBase}):
+     * {@code <family> - Bold.ttf}, {@code <family> - Italic.ttf}, {@code <family> - Bold Italic.ttf}.
+     *
+     * @return the variant path, or null if the path does not look like {@code <something> - <face>.<ext>}
+     */
+    public static String getVariantFontPath(final String fontPath, final boolean bold, final boolean italic) {
+        if (fontPath == null || (!bold && !italic)) {
+            return null;
+        }
+        final int sep = fontPath.lastIndexOf(" - ");
+        final int dot = fontPath.lastIndexOf('.');
+        final int extLen = dot == -1 ? -1 : fontPath.length() - dot;
+        if (sep < 3 || dot <= sep || extLen < 2 || extLen > 5) {
+            return null;
+        }
+        final String face = bold && italic ? "Bold Italic" : bold ? "Bold" : "Italic";
+        return fontPath.substring(0, sep) + " - " + face + fontPath.substring(dot);
+    }
+
+    /**
+     * Resolve a real bold/italic face for the currently configured editor font.
+     *
+     * @return the face, or null when no matching variant exists (callers fall back to
+     * the synthetic skew / fake-bold {@link HighlightSpan} behavior)
+     */
+    protected Typeface resolveStyledFace(final boolean bold, final boolean italic) {
+        if ((!bold && !italic) || _appSettings == null || _fontFamily == null || _fontFamily.isEmpty()) {
+            return null;
+        }
+        final String path = getVariantFontPath(_fontFamily, bold, italic);
+        if (path == null || FACE_MISSING.contains(path)) {
+            return null;
+        }
+        final Typeface cached = FACE_CACHE.get(path);
+        if (cached != null) {
+            return cached;
+        }
+        Typeface face = null;
+        try {
+            if (path.startsWith(ASSET_PREFIX)) {
+                face = Typeface.createFromAsset(_appSettings.getContext().getAssets(), path.substring(ASSET_PREFIX.length()));
+            } else if (new File(path).isFile()) {
+                face = Typeface.createFromFile(path);
+            }
+        } catch (Exception ex) {
+            Log.w(getClass().getName(), "Failed to load font face " + path, ex);
+            face = null;
+        }
+        if (face == null) {
+            FACE_MISSING.add(path);
+        } else {
+            FACE_CACHE.put(path, face);
+        }
+        return face;
+    }
 
     protected static SyntaxHighlighterBase getDefaultHighlighter(final AppSettings as) {
         return new PlaintextSyntaxHighlighter(as);
@@ -441,6 +517,7 @@ public abstract class SyntaxHighlighterBase {
         // Highlighting cannot generate exceptions!
         try {
             generateSpans();
+            mergeStyledFaceSpans(); // tsun-markor fork: combine co-located bold+italic face spans
             Collections.sort(_groupBuffer); // Dramatically improves performance
         } catch (Exception ex) {
             Log.w(getClass().getName(), ex);
@@ -488,7 +565,68 @@ public abstract class SyntaxHighlighterBase {
     }
 
     protected final void createStyleSpanForMatches(final Pattern pattern, final int style, int... groupsToMatch) {
-        createSpanForMatches(pattern, new HighlightSpan().setTypeface(style), groupsToMatch);
+        // tsun-markor fork: use true bold/italic font faces (e.g. cursive Operator Mono
+        // Italic) when the configured font ships matching variant files; otherwise fall
+        // back to the synthetic skew / fake-bold HighlightSpan
+        final boolean bold = (style & Typeface.BOLD) != 0;
+        final boolean italic = (style & Typeface.ITALIC) != 0;
+        final Typeface face = resolveStyledFace(bold, italic);
+        if (face != null) {
+            createSpanForMatches(pattern, m -> new StyledTypefaceSpan(face, bold, italic), groupsToMatch);
+        } else {
+            createSpanForMatches(pattern, new HighlightSpan().setTypeface(style), groupsToMatch);
+        }
+    }
+
+    /**
+     * tsun-markor fork: Merge bold and italic face spans which share an identical range.
+     * The markdown/orgmode/wikitext highlighters emit a bold span <em>and</em> an italic
+     * span for triple-marker emphasis ({@code ***x***}), and Typeface spans cannot
+     * compose — the last one applied would win, dropping the bold. Co-located spans are
+     * therefore combined into a single span resolved to the Bold Italic face. Partially
+     * overlapping (nested) spans are deliberately left untouched.
+     */
+    private void mergeStyledFaceSpans() {
+        final List<SpanGroup> styled = new ArrayList<>();
+        for (final SpanGroup g : _groupBuffer) {
+            if (g != null && g.span instanceof StyledTypefaceSpan) {
+                styled.add(g);
+            }
+        }
+        if (styled.size() < 2) {
+            return;
+        }
+        final List<SpanGroup> drop = new ArrayList<>();
+        final List<SpanGroup> add = new ArrayList<>();
+        for (int i = 0; i < styled.size(); i++) {
+            final SpanGroup a = styled.get(i);
+            if (drop.contains(a)) {
+                continue;
+            }
+            final StyledTypefaceSpan sa = (StyledTypefaceSpan) a.span;
+            for (int j = i + 1; j < styled.size(); j++) {
+                final SpanGroup b = styled.get(j);
+                if (drop.contains(b)) {
+                    continue;
+                }
+                final StyledTypefaceSpan sb = (StyledTypefaceSpan) b.span;
+                if ((sa.isBold() == sb.isBold() && sa.isItalic() == sb.isItalic())
+                        || a.start != b.start || a.end != b.end) {
+                    continue;
+                }
+                final boolean bold = sa.isBold() || sb.isBold();
+                final boolean italic = sa.isItalic() || sb.isItalic();
+                final Typeface face = resolveStyledFace(bold, italic);
+                if (face == null) {
+                    continue;
+                }
+                add.add(new SpanGroup(new StyledTypefaceSpan(face, bold, italic), a.start, a.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE));
+                drop.add(a);
+                drop.add(b);
+            }
+        }
+        _groupBuffer.removeAll(drop);
+        _groupBuffer.addAll(add);
     }
 
     protected final void createColorSpanForMatches(final Pattern pattern, final int color, int... groupsToMatch) {
@@ -551,7 +689,13 @@ public abstract class SyntaxHighlighterBase {
     }
 
     protected final void createSmallBlueLinkSpans() {
-        createSpanForMatches(URL, new HighlightSpan().setForeColor(0xff1ea3fd).setItalic(true).setTextScale(0.85f));
+        // tsun-markor fork: links use the true italic face when available, else skew
+        final Typeface italicFace = resolveStyledFace(false, true);
+        if (italicFace != null) {
+            createSpanForMatches(URL, new HighlightSpan().setForeColor(0xff1ea3fd).setFace(italicFace).setTextScale(0.85f));
+        } else {
+            createSpanForMatches(URL, new HighlightSpan().setForeColor(0xff1ea3fd).setItalic(true).setTextScale(0.85f));
+        }
     }
 
     protected final void createUnderlineHexColorsSpans() {
@@ -570,6 +714,10 @@ public abstract class SyntaxHighlighterBase {
         Integer foregroundColor = null;
         public @ColorInt
         Integer backgroundColor = null;
+        // tsun-markor fork: optional true font face replacing the synthetic skew.
+        // Draw-state only (CharacterStyle cannot affect measure) — used for short
+        // regions like link spans.
+        public Typeface typeface = null;
 
         // Setters. Use null (default) to indicate "don't change this value"
         public HighlightSpan setForeColor(@ColorInt Integer color) {
@@ -607,6 +755,12 @@ public abstract class SyntaxHighlighterBase {
             return this;
         }
 
+        // tsun-markor fork: attach a real font face (overrides the italic skew)
+        public HighlightSpan setFace(Typeface face) {
+            typeface = face;
+            return this;
+        }
+
         public HighlightSpan setTypeface(final int tf) {
             return setBold((tf & Typeface.BOLD) != 0).setItalic((tf & Typeface.ITALIC) != 0);
         }
@@ -625,7 +779,10 @@ public abstract class SyntaxHighlighterBase {
                 tp.setUnderlineText(underline);
             }
 
-            if (italic != null && italic) {
+            if (typeface != null) {
+                // tsun-markor fork: real face takes precedence over the synthetic skew
+                tp.setTypeface(typeface);
+            } else if (italic != null && italic) {
                 tp.setTextSkewX(-0.25f); // This is what android uses
             }
 
@@ -653,7 +810,51 @@ public abstract class SyntaxHighlighterBase {
                     .setItalic(italic)
                     .setUnderline(underline)
                     .setStrike(strikethrough)
-                    .setTextScale(textScale);
+                    .setTextScale(textScale)
+                    .setFace(typeface);
+        }
+    }
+
+    /**
+     * tsun-markor fork: A metric-affecting span which swaps in a true bold/italic font
+     * face (e.g. the cursive Operator Mono Italic). Extends {@link TypefaceSpan} for the
+     * {@link android.text.style.MetricAffectingSpan} machinery; the family string is
+     * unused because both apply methods are overridden (classic CustomTypefaceSpan
+     * pattern — {@code TypefaceSpan(Typeface)} would need API 28, minSdk is 19).
+     */
+    public static class StyledTypefaceSpan extends TypefaceSpan {
+
+        private final Typeface _face;
+        private final boolean _bold;
+        private final boolean _italic;
+
+        public StyledTypefaceSpan(final Typeface face, final boolean bold, final boolean italic) {
+            super("");
+            _face = face;
+            _bold = bold;
+            _italic = italic;
+        }
+
+        public Typeface getFace() {
+            return _face;
+        }
+
+        public boolean isBold() {
+            return _bold;
+        }
+
+        public boolean isItalic() {
+            return _italic;
+        }
+
+        @Override
+        public void updateDrawState(final TextPaint tp) {
+            tp.setTypeface(_face);
+        }
+
+        @Override
+        public void updateMeasureState(final TextPaint tp) {
+            tp.setTypeface(_face);
         }
     }
 

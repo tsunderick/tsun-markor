@@ -47,10 +47,13 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.annotation.StringRes;
 import androidx.appcompat.app.AlertDialog;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentActivity;
 import androidx.core.content.ContextCompat;
 
 import net.gsantner.markor.R;
 import net.gsantner.markor.activity.DocumentActivity;
+import net.gsantner.markor.activity.DocumentEditAndViewFragment;
 import net.gsantner.markor.format.ActionButtonBase;
 import net.gsantner.markor.format.todotxt.TodoTxtBasicSyntaxHighlighter;
 import net.gsantner.markor.format.todotxt.TodoTxtFilter;
@@ -798,6 +801,22 @@ public class MarkorDialogFactory {
     }
 
     /**
+     * tsun-markor fork: re-anchor the auto-hiding bars of the visible
+     * {@link DocumentEditAndViewFragment} after a programmatic scroll jump,
+     * so the jump's delta is not mistaken for user scrolling.
+     */
+    private static void resyncBarsOf(final Activity activity) {
+        if (activity instanceof FragmentActivity) {
+            for (final Fragment fragment : ((FragmentActivity) activity).getSupportFragmentManager().getFragments()) {
+                if (fragment instanceof DocumentEditAndViewFragment) {
+                    ((DocumentEditAndViewFragment) fragment).resyncBars();
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
      * Show a dialog to select a heading
      *
      * @param activity      Activity
@@ -874,6 +893,8 @@ public class MarkorDialogFactory {
             final String jumpJs = "document.querySelector('[line=\"" + line + "\"]').scrollIntoView();";
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && webView != null) {
                 webView.evaluateJavascript(jumpJs, null);
+                // tsun-markor fork: the jump is not user scrolling — re-anchor the auto-hide bars
+                webView.postDelayed(() -> resyncBarsOf(activity), 200);
             }
         };
 

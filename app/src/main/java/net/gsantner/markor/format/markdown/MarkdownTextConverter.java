@@ -110,8 +110,11 @@ public class MarkdownTextConverter extends TextConverterBase {
     public static final String HTML_TOKEN_ITEM_S = "<span class='{{ scope }}-item-{{ attrName }}'>";
     public static final String HTML_TOKEN_ITEM_E = "</span>";
     public static final String HTML_TOKEN_DELIMITER = "<span class='{{ scope }}-delimiter-{{ attrName }} delimiter'></span>";
+    // tsun-markor fork: visible key label for frontmatter items (upstream shows values only — the key exists just as a CSS class)
+    public static final String HTML_FRONTMATTER_KEY_S = "<span class='front-matter-key'>";
+    public static final String HTML_FRONTMATTER_KEY_E = "</span>";
 
-    public static final String CSS_FRONTMATTER = CSS_S + "span.delimiter::before { content: ', '; } .front-matter-container { margin-bottom: 1.5em; border-bottom: 2px solid #444444; } .front-matter-item { text-align: right; margin-bottom: 0.25em; } .front-matter-container-title { font-weight: bold; font-size: 110%; } .front-matter-container-tags { white-space: pre; overflow: scroll; font-size: 80%; } div.front-matter-item > .post-item-tags { padding: 0.1em 0.4em; border-radius: 50rem; background-color: #1c1c1c; } div.front-matter-item > span.post-item-tags:not(:first-child) { margin-left: 0.25em; } div.front-matter-item > span.post-delimiter-tags::before { content: ' '; }" + CSS_E;
+    public static final String CSS_FRONTMATTER = CSS_S + "span.delimiter::before { content: ', '; } .front-matter-container { margin-bottom: 1.5em; border-bottom: 2px solid #444444; } .front-matter-item { text-align: right; margin-bottom: 0.25em; } .front-matter-container-title { font-weight: bold; font-size: 110%; } .front-matter-container-tags { white-space: pre; overflow: scroll; font-size: 80%; } div.front-matter-item > .post-item-tags { padding: 0.1em 0.4em; border-radius: 50rem; background-color: #1c1c1c; } div.front-matter-item > span.post-item-tags:not(:first-child) { margin-left: 0.25em; } div.front-matter-item > span.post-delimiter-tags::before { content: ' '; } .front-matter-key { color: #da9fdc; margin-right: 0.3em; } .front-matter-key::after { content: ': '; } div.front-matter-item a { text-decoration: none; }" + CSS_E;
     public static final String YAML_FRONTMATTER_SCOPES = "post"; //, page, site";
     public static final Pattern YAML_FRONTMATTER_TOKEN_PATTERN = Pattern.compile("\\{\\{\\s+(?:" + YAML_FRONTMATTER_SCOPES.replaceAll(",\\s*", "|") + ")\\.[A-Za-z0-9]+\\s+\\}\\}");
 
@@ -192,6 +195,7 @@ public class MarkdownTextConverter extends TextConverterBase {
 
         // Add id to headers
         options.set(HtmlRenderer.GENERATE_HEADER_ID, true)
+                .set(HtmlRenderer.RENDER_HEADER_ID, true) // tsun-markor fork: flexmark 0.42 only EMITS ids when this is set; without it wikilink heading anchors have no target element
                 .set(HtmlRenderer.HEADER_ID_GENERATOR_RESOLVE_DUPES, true)
                 .set(AnchorLinkExtension.ANCHORLINKS_SET_ID, false)
                 .set(AnchorLinkExtension.ANCHORLINKS_ANCHOR_CLASS, "header_no_underline");
@@ -231,8 +235,11 @@ public class MarkdownTextConverter extends TextConverterBase {
                     if (!(fmaAllowedAttributes.contains(attrName) || fmaAllowedAttributes.contains("*"))) {
                         continue;
                     }
+                    // tsun-markor fork: render the key as a visible label (HTML-escaped — keys come from user YAML)
                     //noinspection StringConcatenationInLoop
-                    fmaText += HTML_FRONTMATTER_ITEM_CONTAINER_S.replace("{{ attrName }}", attrName) + "{{ post." + attrName + " }}\n" + HTML_FRONTMATTER_ITEM_CONTAINER_E + "\n";
+                    fmaText += HTML_FRONTMATTER_ITEM_CONTAINER_S.replace("{{ attrName }}", attrName)
+                            + HTML_FRONTMATTER_KEY_S + TextUtils.htmlEncode(attrName) + HTML_FRONTMATTER_KEY_E
+                            + "{{ post." + attrName + " }}\n" + HTML_FRONTMATTER_ITEM_CONTAINER_E + "\n";
                 }
                 if (!fmaText.isEmpty()) {
                     head += CSS_FRONTMATTER;
@@ -307,12 +314,18 @@ public class MarkdownTextConverter extends TextConverterBase {
         }
 
         // Replace space in url with %20, see #1365
+        // tsun-markor fork: rewrite Obsidian wikilinks [[target|alias]] to [alias](file://...) first,
+        // so they display the alias and route to the linked note (space-escaping below applies to them too)
+        markup = ObsidianWikiLinkResolver.rewriteWikiLinks(markup, as.getNotebookDirectory(), file);
+        // tsun-markor fork: Obsidian-style images — ![alt|300](vault-relative) gets vault-wide resolution + size
+        markup = ObsidianWikiLinkResolver.rewriteObsidianImages(markup, as.getNotebookDirectory(), file);
         markup = escapeSpacesInLink(markup);
 
         // Replace tokens in note with corresponding YAML attribute values
-        markup = replaceTokens(markup, fma);
+        // tsun-markor fork: notebook dir + file passed so wikilinks in frontmatter values resolve to anchors
+        markup = replaceTokens(markup, fma, as.getNotebookDirectory(), file);
         if (!TextUtils.isEmpty(fmaText)) {
-            fmaText = replaceTokens(fmaText, fma);
+            fmaText = replaceTokens(fmaText, fma, as.getNotebookDirectory(), file);
             fmaText = HTML_FRONTMATTER_CONTAINER_S + fmaText + HTML_FRONTMATTER_CONTAINER_E + "\n";
         }
 
@@ -403,7 +416,7 @@ public class MarkdownTextConverter extends TextConverterBase {
         return visitor.getData();
     }
 
-    private String replaceTokens(final String markup, final Map<String, List<String>> fma) {
+    private String replaceTokens(final String markup, final Map<String, List<String>> fma, final File notebookDir, final File file) {
         String markupReplaced = markup;
 
         for (Map.Entry<String, List<String>> entry : fma.entrySet()) {
@@ -423,10 +436,8 @@ public class MarkdownTextConverter extends TextConverterBase {
             for (String v : attrValue) {
                 // Strip surrounding single or double quotes
                 v = v.replaceFirst("^(['\"])(.*)\\1", "$2");
-                v = TextUtils.htmlEncode(v)
-                        .replaceAll("(?<!-)---(?!-)", "&mdash;")
-                        .replaceAll("(?<!-)--(?!-)", "&ndash;")
-                        .trim();
+                // tsun-markor fork: wikilinks in values become clickable anchors (linkless values render exactly as before)
+                v = ObsidianWikiLinkResolver.wikiTextToHtmlLinks(v, notebookDir, file);
                 attrValueOut.add(HTML_TOKEN_ITEM_S + v + HTML_TOKEN_ITEM_E);
             }
             String tokenValue = TextUtils.join(HTML_TOKEN_DELIMITER, attrValueOut).replace("{{ attrName }}", attrName);

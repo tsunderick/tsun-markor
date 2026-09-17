@@ -9,8 +9,11 @@ package net.gsantner.markor.frontend;
 
 import android.app.Activity;
 import android.graphics.Rect;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewTreeObserver;
+
+import net.gsantner.markor.BuildConfig;
 
 /**
  * tsun-markor fork: hides the activity's top app bar and the fragment's bottom
@@ -19,19 +22,34 @@ import android.view.ViewTreeObserver;
  * Rules:
  * <ul>
  *     <li>Scroll down &rarr; hide both bars; scroll up &rarr; show them again;
- *     near the very top of the content &rarr; always show.</li>
- *     <li>While editing with the soft keyboard open, the top bar is hidden and the
- *     bottom action bar kept, maximizing typing space without losing the buttons.
- *     Scroll events are ignored while the keyboard is open, so cursor auto-scrolling
- *     does not fight the user.</li>
+ *     near the very top of the content &rarr; always show. This holds in
+ *     <b>both</b> edit and preview mode.</li>
+ *     <li><b>Asymmetric hysteresis</b>: hiding requires a sustained
+ *     {@link #HIDE_HYSTERESIS_PX} down-travel past the last flip point, showing
+ *     needs only {@link #SHOW_HYSTERESIS_PX} up-travel. Bars are eager to come
+ *     back and reluctant to leave — showing is harmless, hiding is disruptive.
+ *     (A previous plain direction-vote variant had no hysteresis at all: any
+ *     layout-reflow delta re-flipped the state instantly and the bars flapped.)</li>
+ *     <li>While editing with the soft keyboard open, the top bar stays hidden
+ *     regardless of scroll (typing space first), while the bottom action bar
+ *     stays scroll-driven. Scroll events are still evaluated, so the state is
+ *     correct when the keyboard closes.</li>
  *     <li>The bottom bar is only ever shown when the user's action-bar preference
  *     allows it (see {@code setBottomBarAllowed}).</li>
  * </ul>
  * Scroll detection uses a window-level {@link ViewTreeObserver.OnScrollChangedListener},
- * which fires for any view scrolling in this window - covering both the edit-mode
- * {@code DraggableScrollbarScrollView} and the view-mode {@code WebView}.
+ * which fires for any view scrolling in this window - covering the edit-mode
+ * {@code DraggableScrollbarScrollView} plus the view-mode {@code WebView}, which
+ * additionally gets its own {@code onScrollChanged} hook (its scrolls do not
+ * dispatch window-wide).
+ * <p>
+ * <b>Programmatic jumps</b> (scroll restore, wikilink heading anchors) must call
+ * {@link #resyncScrollBaseline()} afterwards so the jump's own delta is never
+ * mistaken for user scrolling.
  */
 public final class BarAutoHideHelper {
+
+    private static final String TAG = "BarAutoHide";
 
     /** Distance (px) from the top of the content below which bars are always shown. */
     private static final int SHOW_AT_TOP_PX = 24;
@@ -39,8 +57,22 @@ public final class BarAutoHideHelper {
     private static final float IME_HEIGHT_RATIO = 0.15f;
     /** Scroll deltas smaller than this are layout noise (clamping), not user scrolling. */
     private static final int SCROLL_DEAD_ZONE_PX = 12;
-    /** How long scroll ticks are ignored after we toggled a bar ourselves. */
-    private static final long TOGGLE_GUARD_MS = 250;
+    /** How long hide-flips are ignored after we toggled a bar ourselves. */
+    private static final long HIDE_GUARD_MS = 400;
+    /** Showing is the safe direction — only a short guard against reflow ticks. */
+    private static final long SHOW_GUARD_MS = 120;
+    /**
+     * Sustained down-travel (px) past the last flip point required before the
+     * bars hide (reluctant to leave).
+     */
+    private static final int HIDE_HYSTERESIS_PX = 64;
+    /**
+     * Up-travel (px) past the last flip point required to show the bars again
+     * (eager to return — this is the whole point of the feature).
+     */
+    private static final int SHOW_HYSTERESIS_PX = 24;
+    /** Guard armed by {@link #resyncScrollBaseline()} to swallow the jump's own delta. */
+    private static final long RESYNC_GUARD_MS = 150;
 
     /** Provides the scroll offset and an absolute scroll target for whichever
      * view is currently the content scroller. */
@@ -63,8 +95,11 @@ public final class BarAutoHideHelper {
     private boolean _previewMode = false;
     private boolean _imeVisible = false;
     private int _lastScrollY = 0;
+    /** Scroll offset at the last bar visibility change; hysteresis is measured from here. */
+    private int _anchorY = 0;
     private long _guardUntilMs = 0;
     private boolean _topShown = true;
+    private long _lastTickLogMs = 0;
 
     public BarAutoHideHelper(final Activity activity, final View fragmentRoot, final ScrollController scrollController) {
         _activity = activity;
@@ -108,6 +143,7 @@ public final class BarAutoHideHelper {
         if (_previewMode != preview) {
             _previewMode = preview;
             _lastScrollY = scrollY();
+            _anchorY = _lastScrollY;
             _barsShown = true;
             applyAll();
         }
@@ -134,6 +170,16 @@ public final class BarAutoHideHelper {
      * Evaluate hide/show state from the current scroll position.
      * Called both from the window scroll listener and from scroll hooks of
      * views whose scrolling does not dispatch window-wide (e.g. the WebView).
+     * <p>
+     * The decision is anchored with <b>asymmetric hysteresis</b>: hiding needs
+     * {@link #HIDE_HYSTERESIS_PX} of sustained down-travel past the previous
+     * flip, showing needs only {@link #SHOW_HYSTERESIS_PX} up-travel. Toggling
+     * a bar reflows the layout and thereby induces scroll deltas all by itself
+     * (viewport clamping, editor cursor re-centering); with plain per-tick
+     * direction voting those self-induced deltas flip the state back, producing
+     * an endless jitter loop (the "vibrating screen"). The guards below break
+     * that loop — and because showing the bars is the harmless direction, its
+     * guard and hysteresis are much lighter, so bars come back eagerly.
      */
     public void onScrollTick() {
         final int y = scrollY();
@@ -146,30 +192,73 @@ public final class BarAutoHideHelper {
             return;
         }
         if (y <= SHOW_AT_TOP_PX) {
-            _barsShown = true;
-        } else if (dy > 0) {
-            _barsShown = false;
-        } else if (dy < 0) {
-            _barsShown = true;
+            setBarsShown(true);
+        } else if (_barsShown && dy > 0 && y - _anchorY >= HIDE_HYSTERESIS_PX) {
+            setBarsShown(false);
+        } else if (!_barsShown && dy < 0 && _anchorY - y >= SHOW_HYSTERESIS_PX) {
+            setBarsShown(true);
+        }
+        logTick(y, dy);
+    }
+
+    /**
+     * Actually change the scroll-driven bar state. Arms the direction-specific
+     * toggle guard and re-anchors the hysteresis point, then re-syncs the scroll
+     * baseline once the reflow triggered by this very change has settled, so its
+     * delta can never be mistaken for user scrolling.
+     */
+    private void setBarsShown(final boolean shown) {
+        if (_barsShown == shown) {
+            return;
+        }
+        _barsShown = shown;
+        _anchorY = scrollY();
+        _guardUntilMs = android.os.SystemClock.uptimeMillis() + (shown ? SHOW_GUARD_MS : HIDE_GUARD_MS);
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "bars " + (shown ? "SHOWN" : "hidden") + " at y=" + _anchorY
+                    + " preview=" + _previewMode + " ime=" + _imeVisible);
         }
         applyAll();
+        _fragmentRoot.post(() -> {
+            if (_attached) {
+                _lastScrollY = scrollY();
+                _anchorY = scrollY();
+            }
+        });
+    }
+
+    /**
+     * tsun-markor fork: re-anchor the scroll baseline after a <b>programmatic</b>
+     * scroll jump (scroll restore, wikilink heading anchor, …). Without this the
+     * jump's large single-tick delta leaves a stale/phantom anchor and the next
+     * real user scroll needs an unreasonable distance before the bars react.
+     */
+    public void resyncScrollBaseline() {
+        if (!_attached) {
+            return;
+        }
+        _lastScrollY = scrollY();
+        _anchorY = _lastScrollY;
+        _guardUntilMs = Math.max(_guardUntilMs, android.os.SystemClock.uptimeMillis() + RESYNC_GUARD_MS);
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "resync baseline to y=" + _anchorY + " preview=" + _previewMode);
+        }
     }
 
     /**
      * tsun-markor: single place deciding bar visibility.
      * <p>
-     * The TOP bar in edit mode is deliberately <b>not</b> scroll-toggled: a
-     * {@code GONE}/{@code VISIBLE} toggle reflows the layout, and the focused
-     * editor then scrolls its cursor back into view, yanking the scroll position
-     * to the selection (the "jumps to the bottom" bug - the editor even documents
-     * that reflow "will bring focus back to the cursor and reset scroll
-     * position"). Instead the top bar in edit mode follows only the keyboard
-     * state. The bottom bar grows the viewport downward when hidden, which
-     * cannot push the cursor out of view, so it stays scroll-driven in both
-     * modes; the toggle guard swallows the small clamp delta its reflow produces.
+     * The top bar is scroll-driven in <b>both</b> modes ({@code _barsShown});
+     * while editing with the soft keyboard open it additionally stays hidden
+     * regardless of scroll, keeping the typing space clean. The original
+     * hesitation to scroll-toggle the top bar in edit mode (a toggle reflows
+     * the layout and the focused editor scrolls its cursor back into view,
+     * inducing scroll deltas) is contained by the guard + hysteresis +
+     * post-reflow re-sync, exactly like for the bottom bar — which has been
+     * scroll-driven in edit mode all along without oscillating.
      */
     private void applyAll() {
-        final boolean topVisible = _previewMode ? _barsShown : !_imeVisible;
+        final boolean topVisible = _barsShown && !(!_previewMode && _imeVisible);
         setTopBarShown(topVisible);
         setBottomBarShown(_barsShown);
     }
@@ -186,6 +275,7 @@ public final class BarAutoHideHelper {
         if (imeVisible != _imeVisible) {
             _imeVisible = imeVisible;
             _lastScrollY = scrollY();
+            _anchorY = _lastScrollY;
             if (!_previewMode) {
                 _barsShown = true;
             }
@@ -216,21 +306,24 @@ public final class BarAutoHideHelper {
         }
     }
 
-    private void applyBottomVisibility(final boolean shown) {
-        if (!isAlive()) {
-            return;
-        }
-        final View parent = _fragmentRoot.findViewById(net.gsantner.markor.R.id.document__fragment__edit__text_actions_bar__scrolling_parent);
-        if (parent != null) {
-            parent.setVisibility(_bottomBarAllowed && shown ? View.VISIBLE : View.GONE);
-        }
-    }
-
     private View _activityToolbar() {
         return _activity == null ? null : _activity.findViewById(net.gsantner.markor.R.id.toolbar);
     }
 
     private boolean isAlive() {
         return _attached && _fragmentRoot != null && _fragmentRoot.isAttachedToWindow();
+    }
+
+    private void logTick(final int y, final int dy) {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+        final long now = android.os.SystemClock.uptimeMillis();
+        if (now - _lastTickLogMs < 250) {
+            return;
+        }
+        _lastTickLogMs = now;
+        Log.d(TAG, "tick y=" + y + " dy=" + dy + " shown=" + _barsShown
+                + " anchor=" + _anchorY + " preview=" + _previewMode + " ime=" + _imeVisible);
     }
 }

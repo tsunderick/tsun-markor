@@ -25,6 +25,8 @@ public class MarkdownSyntaxHighlighter extends SyntaxHighlighterBase {
     public final static Pattern HEADING_SIMPLE = Pattern.compile("(?m)^(#{1,6}\\s.*$)");
     // Group 1 matches image, Group 2 matches text, group 3 matches path
     public static final Pattern LINK = Pattern.compile("(?m)(!)?\\[([^]]*)]\\(([^()]*(?:\\([^()]*\\)[^()]*)*)\\)");
+    // tsun-markor fork: Obsidian wikilinks [[target]], [[target|alias]] (and ![[embed]] form)
+    public final static Pattern WIKI_LINK = ObsidianWikiLinkResolver.WIKI_LINK;
     public final static Pattern LIST_UNORDERED = Pattern.compile("(\\n|^)\\s{0,16}([*+-])( \\[[ xX]\\])?(?= )");
     public final static Pattern LIST_ORDERED = Pattern.compile("(?m)^\\s{0,16}(\\d+)(:?\\.|\\))\\s");
     public final static Pattern QUOTATION = Pattern.compile("(\\n|^)>");
@@ -32,11 +34,12 @@ public class MarkdownSyntaxHighlighter extends SyntaxHighlighterBase {
     public final static Pattern CODE = Pattern.compile("(?m)(`(?!`)(.*?)`)|(^[^\\S\\n]{4}(?![0-9\\-*+]).*$)");
     public final static Pattern DOUBLESPACE_LINE_ENDING = Pattern.compile("(?m)(?<=\\S)([^\\S\\n]{2,})\\n");
 
-    private static final int MD_COLOR_HEADING = 0xffef6D00;
-    private static final int MD_COLOR_LINK = 0xff1ea3fe;
-    private static final int MD_COLOR_LIST = 0xffdaa521;
-    private static final int MD_COLOR_QUOTE = 0xff88b04c;
-    private static final int MD_COLOR_CODEBLOCK = 0x60afafaf;
+    // tsunderick: OLED sakura palette (see ~/.config/omarchy/themes/tsunderick/colors.toml)
+    private static final int MD_COLOR_HEADING = 0xffff8fb1; // accent
+    private static final int MD_COLOR_LINK = 0xffff7aa0; // nvim_bright_red
+    private static final int MD_COLOR_LIST = 0xffda9fdc; // nvim_muted orchid
+    private static final int MD_COLOR_QUOTE = 0xfff7b3d7; // nvim_cyan sakura
+    private static final int MD_COLOR_CODEBLOCK = 0xff111111; // matches preview code bg
 
     public MarkdownSyntaxHighlighter(AppSettings as) {
         super(as);
@@ -71,6 +74,7 @@ public class MarkdownSyntaxHighlighter extends SyntaxHighlighterBase {
         }
 
         createColorSpanForMatches(LINK, MD_COLOR_LINK);
+        createColorSpanForMatches(WIKI_LINK, MD_COLOR_LINK); // tsun-markor fork: Obsidian wikilinks
         createColorSpanForMatches(LIST_UNORDERED, MD_COLOR_LIST);
         createColorSpanForMatches(LIST_ORDERED, MD_COLOR_LIST);
 

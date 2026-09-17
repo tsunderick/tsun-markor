@@ -53,13 +53,18 @@ fonts:
 # make dev         boot emulator (if needed) + incremental build + install + relaunch
 # make emulator    boot tsunderelkasten AVD and wait for full boot
 # make relaunch    force-stop + fresh-launch the app on the emulator
+# make apk         incremental build + refresh the phone-sideload artifact
 export ANDROID_SDK_ROOT ?= $(HOME)/Android/Sdk
 EMULATOR_BIN ?= /opt/android-sdk/emulator/emulator
 AVD          ?= tsunderelkasten
 ADB_BIN      ?= $(ANDROID_SDK_ROOT)/platform-tools/adb
 DEV_PKG      ?= net.gsantner.markor
+# Canonical sideload artifact flashed onto the phone (refreshed by `make apk`).
+# NOTE: `make build` copies APKs into dist/ under their original versioned
+# filename and never touches this file - always use `make apk` to refresh it.
+APK_ARTIFACT ?= dist/tsun-markor-phone.apk
 
-.PHONY: emulator gradle-dev relaunch dev
+.PHONY: emulator gradle-dev relaunch dev apk
 emulator:
 	@if $(ADB_BIN) devices | grep -q "emulator.*device$$"; then \
 	  echo ">> emulator already running"; \
@@ -88,6 +93,14 @@ install-dev:
 relaunch:
 	-$(ADB_BIN) shell am force-stop $(DEV_PKG)
 	$(MAKE) A="shell monkey -p $(DEV_PKG) -c android.intent.category.LAUNCHER 1" L="dev" adb
+
+# Incremental debug build, then overwrite the phone-sideload artifact with the
+# fresh APK. Auto-detects the versioned filename, so it survives version bumps.
+apk: gradle-dev $(DIST_DIR)
+	@apk=$$(find app/build/outputs/apk/flavorDefault/debug -name '*.apk' -not -iname '*unsigned*' -print -quit); \
+	test -n "$$apk" || { echo ">> no debug apk produced"; exit 1; }; \
+	cp -f "$$apk" $(APK_ARTIFACT); \
+	echo ">> refreshed $(APK_ARTIFACT) <- $$apk"
 
 ## Wipe app data (uninstall) so the next `make dev` runs the fresh first-run flow
 reset-app:
