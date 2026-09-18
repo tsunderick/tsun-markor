@@ -61,6 +61,7 @@ named `tsunderelkasten`). The app appears *inside* it after `make dev`.
 | 🖋 Operator Mono (default font) | below |
 | 🎨 Preview theme + frontmatter keys | below |
 | 📱 Auto-hiding bars | below |
+| ⚡ Preview performance (vault index + render cache) | below |
 | 🚀 First-run experience (fork defaults) | last section below |
 
 ### 🎐 Obsidian wikilinks in Markdown
@@ -145,7 +146,9 @@ cosmetic only — the app reads through them fine.)
 
 Tests: `ObsidianWikiLinkResolverTests` (42 cases: resolution, anchors with a
 slug≡flexmark-rendered-id equivalence test, frontmatter linkification with a
-legacy-escaping-parity guard, and image rewriting).
+legacy-escaping-parity guard, and image rewriting), plus
+`VaultIndexParityTests` pinning the per-conversion vault index to identical
+results with the legacy walk (see ⚡ Preview performance below).
 
 ### 🌸 OLED sakura theme (default)
 
@@ -266,6 +269,61 @@ by the same armor the bottom bar always had — direction-specific guards
 baseline re-sync — so the top bar now toggles by scroll in edit mode too,
 with the IME rule kept as an override while typing.
 
+### ⚡ Preview performance (vault index + render cache)
+
+Opening a note and toggling edit↔view used to stutter, and the cost grew with
+the *vault*, not the document. Three root causes, three fixes:
+
+- **Per-link vault walks** — every bare-name wikilink (`[[👤 People]]`, no
+  path) that missed the direct-path lookups triggered a full breadth-first
+  walk of the vault (every directory listed *and sorted*, every entry
+  stat'ed) on the UI thread. A daily note carries 2 such links, the worst
+  note in the vault 101 — in a 1,400-file vault that is up to ~145k stats per
+  render. The new `VaultIndex` walks the vault **once per conversion** and
+  answers all further lookups from in-memory maps. Semantics are
+  parity-tested against the old walk (`VaultIndexParityTests`: target battery
+  × anchor files — fewest-segments rule, extension chains, dot-dir exclusion,
+  `./`/`../`, fences, null-dir). The index is deliberately *per-conversion*:
+  created in `convertMarkup`, passed through the rewrite calls, discarded
+  after — nothing survives a render, so an externally synced vault can never
+  be resolved stale, and there is no invalidation logic to get wrong.
+  Link-free notes never build it (lazy). `resolve()`'s public signature is
+  unchanged: the editor's open-link action keeps its per-tap walk (one link,
+  imperceptible) and the old tests compile untouched.
+- **Empty-text render on open** — `onViewCreated` rendered the preview from
+  the *still empty* editor (preview-first default), then `onResume`'s
+  `loadDocument()` rendered again with real content. The first pass is now
+  skipped (`_documentLoaded` guard); view recreation after rotation is
+  covered by the forced reload path rendering once.
+- **Uncached re-render on every toggle** — `updateViewModeText()` now keys on
+  CRC32(text) + print-mode + line-numbers: an unchanged edit→view toggle
+  skips conversion *and* `loadDataWithBaseURL` entirely — a pure visibility
+  swap where the WebView even keeps its scroll position. Anchor renders
+  (`[[Note#Heading]]` jumps) bypass the cache so jump scripts are never
+  cached or skipped.
+
+Measured (emulator, 7.9 KB playground note, *small* seeded vault — so the
+walks were cheap to begin with): open went 2 renders → 1, unchanged toggle
+194 ms → 0 ms, edited toggle 194 → 146 ms. On the real synced vault (1,442
+files; 3,310 of 5,670 wikilinks are bare-name) the per-render cost used to be
+O(links × vault) and is now one shared walk — flash-tested: open and toggling
+went from "takes a bit" to instantaneous.
+
+#### Debugging: the `tsun-perf` log lines
+
+Debug builds log one line per conversion and per document load —
+`make log | grep tsun-perf`:
+
+```
+tsun-perf: convertMarkup file=Note.md total=146ms markupChars=7853 indexBuildMs=-1 legacyVaultWalks=0 legacyVaultWalkMs=0
+tsun-perf: loadDocument file=Note.md total=339ms
+```
+
+`indexBuildMs` is −1 until the first vault-wide miss needs the index (notes
+whose links all resolve by direct path never pay for it); `legacyVaultWalks`
+should stay 0 — non-zero means a caller used the no-index path (the editor's
+one-link-at-a-time open action does, by design).
+
 ### 🚀 First-run experience (fork defaults)
 
 - **Preview-first** — documents open in view mode by default
@@ -298,6 +356,7 @@ for reading or rewriting:
 | Feature | Key files |
 |---|---|
 | Wikilinks / heading anchors / images / frontmatter linkify | `format/markdown/ObsidianWikiLinkResolver.java` (+ `ObsidianWikiLinkResolverTests`); hooks in `MarkdownTextConverter`, `MarkdownActionButtons`, `MarkdownSyntaxHighlighter` |
+| Preview performance (per-conversion `VaultIndex`, preview render cache, no empty pre-render, `tsun-perf` timing) | `format/markdown/VaultIndex.java` (+ `VaultIndexParityTests`); index overloads + debug counters in `ObsidianWikiLinkResolver`; shared index + timing in `MarkdownTextConverter`; `_documentLoaded` guard + preview cache in `DocumentEditAndViewFragment` |
 | Anchor routing (tap → scroll) | `DocumentActivity` (`EXTRA_FRAGMENT_ID`), `DocumentEditAndViewFragment` (`START_JUMP_ANCHOR`, `jumpToAnchorPreview`), `TextConverterBase` (jump-on-load render overload) |
 | Frontmatter keys as labels | `MarkdownTextConverter` (`HTML_FRONTMATTER_KEY_*`, `CSS_FRONTMATTER`) |
 | Sakura palette (UI + editor + preview) | `values/colors.xml`, `values-night/colors.xml`, per-format syntax highlighters |

@@ -8,7 +8,9 @@
 package net.gsantner.markor.format.markdown;
 
 import android.content.Context;
+import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.Log;
 
 import com.vladsch.flexmark.ext.admonition.AdmonitionExtension;
 import com.vladsch.flexmark.ext.anchorlink.AnchorLinkExtension;
@@ -44,6 +46,7 @@ import com.vladsch.flexmark.util.html.Attributes;
 import com.vladsch.flexmark.util.options.MutableDataHolder;
 import com.vladsch.flexmark.util.options.MutableDataSet;
 
+import net.gsantner.markor.BuildConfig;
 import net.gsantner.markor.R;
 import net.gsantner.markor.format.TextConverterBase;
 import net.gsantner.markor.model.AppSettings;
@@ -163,6 +166,12 @@ public class MarkdownTextConverter extends TextConverterBase {
     //########################
     @Override
     public String convertMarkup(String markup, Context context, boolean lightMode, boolean enableLineNumbers, File file) {
+        // tsun-markor fork: phase-0 perf instrumentation (debug builds log under "tsun-perf")
+        final long dbgT0 = BuildConfig.DEBUG ? SystemClock.elapsedRealtime() : 0L;
+        if (BuildConfig.DEBUG) {
+            ObsidianWikiLinkResolver.DBG_STATS = true;
+            ObsidianWikiLinkResolver.dbgResetStats();
+        }
         final AppSettings as = AppSettings.get(context);
         String converted, onLoadJs = "", head = "";
         final MutableDataSet options = new MutableDataSet();
@@ -315,17 +324,19 @@ public class MarkdownTextConverter extends TextConverterBase {
 
         // Replace space in url with %20, see #1365
         // tsun-markor fork: rewrite Obsidian wikilinks [[target|alias]] to [alias](file://...) first,
-        // so they display the alias and route to the linked note (space-escaping below applies to them too)
-        markup = ObsidianWikiLinkResolver.rewriteWikiLinks(markup, as.getNotebookDirectory(), file);
+        // so they display the alias and route to the linked note (space-escaping below applies to them too).
+        // One shared vault index for every rewrite of this conversion — N full-vault walks become 1 (see VaultIndex)
+        final VaultIndex vaultIndex = new VaultIndex(as.getNotebookDirectory());
+        markup = ObsidianWikiLinkResolver.rewriteWikiLinks(markup, as.getNotebookDirectory(), file, vaultIndex);
         // tsun-markor fork: Obsidian-style images — ![alt|300](vault-relative) gets vault-wide resolution + size
-        markup = ObsidianWikiLinkResolver.rewriteObsidianImages(markup, as.getNotebookDirectory(), file);
+        markup = ObsidianWikiLinkResolver.rewriteObsidianImages(markup, as.getNotebookDirectory(), file, vaultIndex);
         markup = escapeSpacesInLink(markup);
 
         // Replace tokens in note with corresponding YAML attribute values
         // tsun-markor fork: notebook dir + file passed so wikilinks in frontmatter values resolve to anchors
-        markup = replaceTokens(markup, fma, as.getNotebookDirectory(), file);
+        markup = replaceTokens(markup, fma, as.getNotebookDirectory(), file, vaultIndex);
         if (!TextUtils.isEmpty(fmaText)) {
-            fmaText = replaceTokens(fmaText, fma, as.getNotebookDirectory(), file);
+            fmaText = replaceTokens(fmaText, fma, as.getNotebookDirectory(), file, vaultIndex);
             fmaText = HTML_FRONTMATTER_CONTAINER_S + fmaText + HTML_FRONTMATTER_CONTAINER_E + "\n";
         }
 
@@ -356,7 +367,17 @@ public class MarkdownTextConverter extends TextConverterBase {
         }
 
         // Deliver result
-        return putContentIntoTemplate(context, converted, lightMode, file, onLoadJs, head);
+        final String convertedResult = putContentIntoTemplate(context, converted, lightMode, file, onLoadJs, head);
+        if (BuildConfig.DEBUG) {
+            ObsidianWikiLinkResolver.DBG_STATS = false;
+            Log.d("tsun-perf", "convertMarkup file=" + file.getName()
+                    + " total=" + (SystemClock.elapsedRealtime() - dbgT0) + "ms"
+                    + " markupChars=" + markup.length()
+                    + " indexBuildMs=" + vaultIndex.buildMs
+                    + " legacyVaultWalks=" + ObsidianWikiLinkResolver.DBG_WALKS
+                    + " legacyVaultWalkMs=" + ObsidianWikiLinkResolver.DBG_WALK_MS);
+        }
+        return convertedResult;
     }
 
     private String escapeSpacesInLink(final String markup) {
@@ -416,7 +437,7 @@ public class MarkdownTextConverter extends TextConverterBase {
         return visitor.getData();
     }
 
-    private String replaceTokens(final String markup, final Map<String, List<String>> fma, final File notebookDir, final File file) {
+    private String replaceTokens(final String markup, final Map<String, List<String>> fma, final File notebookDir, final File file, final VaultIndex vaultIndex) {
         String markupReplaced = markup;
 
         for (Map.Entry<String, List<String>> entry : fma.entrySet()) {
@@ -437,7 +458,7 @@ public class MarkdownTextConverter extends TextConverterBase {
                 // Strip surrounding single or double quotes
                 v = v.replaceFirst("^(['\"])(.*)\\1", "$2");
                 // tsun-markor fork: wikilinks in values become clickable anchors (linkless values render exactly as before)
-                v = ObsidianWikiLinkResolver.wikiTextToHtmlLinks(v, notebookDir, file);
+                v = ObsidianWikiLinkResolver.wikiTextToHtmlLinks(v, notebookDir, file, vaultIndex);
                 attrValueOut.add(HTML_TOKEN_ITEM_S + v + HTML_TOKEN_ITEM_E);
             }
             String tokenValue = TextUtils.join(HTML_TOKEN_DELIMITER, attrValueOut).replace("{{ attrName }}", attrName);

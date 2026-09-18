@@ -134,6 +134,17 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
     private boolean _nextConvertToPrintMode = false;
     // tsun-markor fork: heading anchor to scroll to on the next preview render, consumed once
     private String _pendingJumpAnchor;
+    // tsun-markor fork (perf): false until loadDocument() has content — the onViewCreated
+    // preview render pass with empty editor text is skipped (onResume's loadDocument does
+    // the one real render)
+    private boolean _documentLoaded = false;
+    // tsun-markor fork (perf): last previewed state — an edit→view toggle with unchanged
+    // text skips conversion AND the WebView reload entirely (pure visibility swap, the
+    // WebView even keeps its scroll position)
+    private boolean _hasPreviewCache = false;
+    private int _lastPreviewCrc;
+    private boolean _lastPreviewLightMode;
+    private boolean _lastPreviewLineNum;
 
     public DocumentEditAndViewFragment() {
         super();
@@ -513,6 +524,9 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
             return false;
         }
 
+        // tsun-markor fork: phase-0 perf instrumentation (debug builds log under "tsun-perf")
+        final long dbgT0 = BuildConfig.DEBUG ? android.os.SystemClock.elapsedRealtime() : 0L;
+
         // Only trigger the load process if constructing or file updated or force reload
         if (_document.hasFileChangedSinceLastLoad()) {
 
@@ -528,11 +542,31 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
 
             checkTextChangeState();
 
+            // tsun-markor fork (perf): the editor now holds real content — un-stall the
+            // preview render stalled by the onViewCreated empty-text pass
+            _documentLoaded = true;
+            _hasPreviewCache = false; // content changed on disk → stale
+
             if (_isPreviewVisible) {
                 updateViewModeText();
             }
 
+            if (BuildConfig.DEBUG) {
+                Log.d("tsun-perf", "loadDocument file=" + _document.file.getName()
+                        + " total=" + (android.os.SystemClock.elapsedRealtime() - dbgT0) + "ms");
+            }
+
             return true;
+        }
+
+        // tsun-markor fork (perf): fragment view (re)created without a file change —
+        // e.g. rotation — text is already in the editor but this view's preview never
+        // rendered; render it once now
+        if (!_documentLoaded) {
+            _documentLoaded = true;
+            if (_isPreviewVisible) {
+                updateViewModeText();
+            }
         }
         return false;
     }
@@ -1198,12 +1232,48 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
         // tsun-markor fork: consume a pending wikilink heading anchor ([[Note#Heading]]) on this render
         final String jumpAnchor = _pendingJumpAnchor;
         _pendingJumpAnchor = null;
+
+        // tsun-markor fork (perf): onViewCreated renders before the document is loaded;
+        // onResume's loadDocument() performs the one real render — skip the wasted empty pass
+        if (!_documentLoaded) {
+            return;
+        }
+
+        final String text = getTextString();
+        final boolean lightMode = _nextConvertToPrintMode;
+        final boolean lineNum = _lineNumbersView.isLineNumbersEnabled();
+        // Anchor renders inject a scroll script into the HTML — never cache-skip or cache-poison them
+        final boolean jumpRender = jumpAnchor != null && !jumpAnchor.trim().isEmpty();
+
+        // tsun-markor fork (perf): skip re-conversion when nothing that affects the render
+        // changed — an unchanged edit→view toggle becomes a pure visibility swap
+        if (!jumpRender && _hasPreviewCache
+                && _lastPreviewCrc == crc32(text)
+                && _lastPreviewLightMode == lightMode
+                && _lastPreviewLineNum == lineNum) {
+            return;
+        }
+
         // Don't let text to view mode crash app
         try {
-            _format.getConverter().convertMarkupShowInWebView(_document, getTextString(), getActivity(), _webView, _nextConvertToPrintMode, _lineNumbersView.isLineNumbersEnabled(), jumpAnchor);
+            _format.getConverter().convertMarkupShowInWebView(_document, text, getActivity(), _webView, lightMode, lineNum, jumpAnchor);
+            if (!jumpRender) {
+                _lastPreviewCrc = crc32(text);
+                _lastPreviewLightMode = lightMode;
+                _lastPreviewLineNum = lineNum;
+                _hasPreviewCache = true;
+            }
         } catch (OutOfMemoryError e) {
-            _format.getConverter().convertMarkupShowInWebView(_document, "updateViewModeText getTextString(): OutOfMemory  " + e, getActivity(), _webView, _nextConvertToPrintMode, _lineNumbersView.isLineNumbersEnabled());
+            _hasPreviewCache = false;
+            _format.getConverter().convertMarkupShowInWebView(_document, "updateViewModeText getTextString(): OutOfMemory  " + e, getActivity(), _webView, lightMode, lineNum);
         }
+    }
+
+    /** tsun-markor fork (perf): CRC32 over the editor text for the preview cache key. */
+    private static int crc32(final String text) {
+        final java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(text == null ? new byte[0] : text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return (int) crc.getValue();
     }
 
     /** tsun-markor fork: re-anchor auto-hiding bars after a programmatic scroll (e.g. TOC jump). */
@@ -1288,6 +1358,19 @@ public class DocumentEditAndViewFragment extends MarkorBaseFragment implements F
             _webViewClient.setAssetLoader(new WebViewAssetLoader.Builder()
                     .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(activity.getApplicationContext()))
                     .build());
+            // tsun-markor fork: after a preview page load, GsWebViewClient restores the
+            // saved scroll position via retries at 50-300ms. Re-anchor the auto-hide bar
+            // baseline across that whole window so the programmatic restore is never
+            // mistaken for a downward user scroll (which would insta-hide the bars).
+            _webViewClient.setOnPageSettled(() -> {
+                for (final int dt : new int[]{0, 100, 200, 350}) {
+                    _webView.postDelayed(() -> {
+                        if (_barAutoHideHelper != null && _webView != null) {
+                            _barAutoHideHelper.resyncScrollBaseline();
+                        }
+                    }, dt);
+                }
+            });
             _webView.setWebViewClient(_webViewClient);
 
             if (_webView instanceof DraggableScrollbarWebView) {

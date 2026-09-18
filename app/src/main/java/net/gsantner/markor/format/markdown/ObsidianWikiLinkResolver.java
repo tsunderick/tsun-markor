@@ -53,8 +53,8 @@ public final class ObsidianWikiLinkResolver {
     /** Matches ![alt](path) markdown images, including Obsidian's ![alt|300] / ![alt|300x200] size syntax. */
     public static final Pattern MD_IMAGE = Pattern.compile("!\\[([^\\]\\[]*)\\]\\(([^()]+)\\)");
 
-    /** Extensions tried in order when looking a target up on disk. */
-    private static final String[] TARGET_EXTENSIONS = {"", ".md", ".markdown", ".md.txt"};
+    /** Extensions tried in order when looking a target up on disk. (package-private: also used by {@link VaultIndex}) */
+    static final String[] TARGET_EXTENSIONS = {"", ".md", ".markdown", ".md.txt"};
 
     private ObsidianWikiLinkResolver() {
     }
@@ -135,6 +135,15 @@ public final class ObsidianWikiLinkResolver {
      *         input is empty or no notebook directory is known
      */
     public static File resolve(final File notebookDir, final File currentFile, final String target) {
+        return resolve(notebookDir, currentFile, target, null);
+    }
+
+    /**
+     * Same resolution, sharing a per-conversion {@link VaultIndex} for the
+     * vault-wide search. {@code index == null} falls back to the legacy
+     * per-link full-vault walk (used by one-off callers and the unit tests).
+     */
+    static File resolve(final File notebookDir, final File currentFile, final String target, final VaultIndex index) {
         String t = target == null ? "" : target.trim();
         if (t.isEmpty() || notebookDir == null) {
             return null;
@@ -174,7 +183,7 @@ public final class ObsidianWikiLinkResolver {
 
         // 3) Vault-wide search: filename (or root-relative path) match,
         //    shortest absolute path wins
-        candidate = searchVault(notebookDir, t);
+        candidate = index != null ? index.searchVault(t) : searchVault(notebookDir, t);
         if (candidate != null) {
             return candidate;
         }
@@ -195,6 +204,14 @@ public final class ObsidianWikiLinkResolver {
      * are also left untouched.</p>
      */
     public static String rewriteWikiLinks(final String markup, final File notebookDir, final File currentFile) {
+        return rewriteWikiLinks(markup, notebookDir, currentFile, null);
+    }
+
+    /**
+     * Same rewrite, sharing a per-conversion {@link VaultIndex}; null index
+     * falls back to the legacy per-link vault walk.
+     */
+    public static String rewriteWikiLinks(final String markup, final File notebookDir, final File currentFile, final VaultIndex index) {
         if (markup == null || !markup.contains("[[")) {
             return markup;
         }
@@ -210,7 +227,7 @@ public final class ObsidianWikiLinkResolver {
             } else if (inFence) {
                 out.append(line);
             } else {
-                rewriteLine(line, notebookDir, currentFile, out);
+                rewriteLine(line, notebookDir, currentFile, out, index);
             }
             if (i < lines.length - 1) {
                 out.append('\n');
@@ -231,6 +248,11 @@ public final class ObsidianWikiLinkResolver {
      * unresolvable targets stay as literal (escaped) text.</p>
      */
     public static String wikiTextToHtmlLinks(final String value, final File notebookDir, final File currentFile) {
+        return wikiTextToHtmlLinks(value, notebookDir, currentFile, null);
+    }
+
+    /** Same conversion, sharing a per-conversion {@link VaultIndex}; null index falls back to the legacy walk. */
+    public static String wikiTextToHtmlLinks(final String value, final File notebookDir, final File currentFile, final VaultIndex index) {
         if (value == null) {
             return "";
         }
@@ -243,7 +265,7 @@ public final class ObsidianWikiLinkResolver {
         int last = 0;
         while (m.find()) {
             out.append(escapeDisplayText(value.substring(last, m.start())))
-                    .append(wikiLinkToHtml(m.group(), notebookDir, currentFile));
+                    .append(wikiLinkToHtml(m.group(), notebookDir, currentFile, index));
             last = m.end();
         }
         out.append(escapeDisplayText(value.substring(last)));
@@ -253,7 +275,7 @@ public final class ObsidianWikiLinkResolver {
     }
 
     /** Render one raw wikilink as an anchor, or the escaped literal when unresolvable. */
-    private static String wikiLinkToHtml(final String raw, final File notebookDir, final File currentFile) {
+    private static String wikiLinkToHtml(final String raw, final File notebookDir, final File currentFile, final VaultIndex index) {
         final String[] parts = extractTargetAndAnchor(raw);
         final String target = parts[0];
         final String anchor = parts[1];
@@ -264,7 +286,7 @@ public final class ObsidianWikiLinkResolver {
         if (target.isEmpty() && !slug.isEmpty()) {
             href = "#" + slug; // same-page anchor
         } else {
-            final File resolved = resolve(notebookDir, currentFile, target);
+            final File resolved = resolve(notebookDir, currentFile, target, index);
             if (resolved == null) {
                 return escapeDisplayText(raw);
             }
@@ -307,6 +329,11 @@ public final class ObsidianWikiLinkResolver {
      * </ul>
      */
     public static String rewriteObsidianImages(final String markup, final File notebookDir, final File currentFile) {
+        return rewriteObsidianImages(markup, notebookDir, currentFile, null);
+    }
+
+    /** Same rewrite, sharing a per-conversion {@link VaultIndex}; null index falls back to the legacy walk. */
+    public static String rewriteObsidianImages(final String markup, final File notebookDir, final File currentFile, final VaultIndex index) {
         if (markup == null || !markup.contains("](")) {
             return markup;
         }
@@ -317,7 +344,7 @@ public final class ObsidianWikiLinkResolver {
             final String original = m.group();
             final String alt = m.group(1);
             final String path = m.group(2).trim();
-            final String replacement = rewriteImage(original, alt, path, notebookDir, currentFile);
+            final String replacement = rewriteImage(original, alt, path, notebookDir, currentFile, index);
             m.appendReplacement(out, Matcher.quoteReplacement(replacement != null ? replacement : original));
         }
         m.appendTail(out);
@@ -325,7 +352,7 @@ public final class ObsidianWikiLinkResolver {
     }
 
     /** Returns the replacement for one image match, or null to keep the original. */
-    private static String rewriteImage(final String original, final String alt, final String path, final File notebookDir, final File currentFile) {
+    private static String rewriteImage(final String original, final String alt, final String path, final File notebookDir, final File currentFile, final VaultIndex index) {
         // Web / already-absolute URLs are not ours to fix
         if (path.matches("(?i)^(https?|file|data|content):.*") || path.startsWith("//")) {
             return null;
@@ -351,7 +378,7 @@ public final class ObsidianWikiLinkResolver {
             return null; // working standard markdown — leave alone
         }
 
-        final File resolved = resolve(notebookDir, currentFile, path);
+        final File resolved = resolve(notebookDir, currentFile, path, index);
         if (resolved == null || !resolved.isFile()) {
             return null; // unresolvable: keep original (still renders via relative base)
         }
@@ -369,7 +396,7 @@ public final class ObsidianWikiLinkResolver {
         return img.append(" />").toString();
     }
 
-    private static void rewriteLine(final String line, final File notebookDir, final File currentFile, final StringBuilder out) {        final Matcher m = WIKI_LINK.matcher(line);
+    private static void rewriteLine(final String line, final File notebookDir, final File currentFile, final StringBuilder out, final VaultIndex index) {        final Matcher m = WIKI_LINK.matcher(line);
         int last = 0;
         while (m.find()) {
             final String raw = m.group();
@@ -388,7 +415,7 @@ public final class ObsidianWikiLinkResolver {
                 // Same-page anchor [[#Heading]] -> native fragment jump
                 href = "#" + slug;
             } else {
-                final File resolved = resolve(notebookDir, currentFile, target);
+                final File resolved = resolve(notebookDir, currentFile, target, index);
                 if (resolved == null) {
                     continue; // unresolvable: keep the raw text
                 }
@@ -400,6 +427,21 @@ public final class ObsidianWikiLinkResolver {
             last = m.end();
         }
         out.append(line, last, line.length());
+    }
+
+    // ---------------------------------------------------------------------------------
+    // tsun-markor fork: debug performance counters (phase-0 instrumentation).
+    // Only accumulated while DBG_STATS is armed — MarkdownTextConverter arms it around
+    // one conversion in debug builds and logs the numbers under the "tsun-perf" tag.
+    // Cost when disarmed: one volatile read per vault walk.
+    // ---------------------------------------------------------------------------------
+    static volatile boolean DBG_STATS = false;
+    static volatile long DBG_WALKS = 0;
+    static volatile long DBG_WALK_MS = 0;
+
+    static void dbgResetStats() {
+        DBG_WALKS = 0;
+        DBG_WALK_MS = 0;
     }
 
     /** Try the target (with each candidate extension appended) below base dir; first existing file wins. */
@@ -427,6 +469,7 @@ public final class ObsidianWikiLinkResolver {
 
     /** Breadth-first, sorted walk of the vault; returns the best match (fewest path segments, then lexicographic) or null. */
     private static File searchVault(final File root, final String target) {
+        final long t0 = DBG_STATS ? System.nanoTime() : 0L;
         final String baseName = target.substring(target.lastIndexOf('/') + 1);
         final Deque<File> queue = new ArrayDeque<>();
         queue.add(root);
@@ -459,11 +502,15 @@ public final class ObsidianWikiLinkResolver {
                 }
             }
         }
+        if (DBG_STATS) {
+            DBG_WALKS++;
+            DBG_WALK_MS += (System.nanoTime() - t0) / 1_000_000L;
+        }
         return best;
     }
 
-    /** Number of path segments of {@code file} below {@code root} (file itself included). */
-    private static int countPathSegments(final File file, final File root) {
+    /** Number of path segments of {@code file} below {@code root} (file itself included). (package-private: also used by {@link VaultIndex}) */
+    static int countPathSegments(final File file, final File root) {
         final String rel = relativeToRoot(file, root);
         if (rel == null || rel.isEmpty()) {
             return rel == null ? Integer.MAX_VALUE : 0;
@@ -496,7 +543,8 @@ public final class ObsidianWikiLinkResolver {
         return false;
     }
 
-    private static String relativeToRoot(final File file, final File root) {
+    /** (package-private: also used by {@link VaultIndex}) */
+    static String relativeToRoot(final File file, final File root) {
         final String rootPath = root.getAbsolutePath();
         final String filePath = file.getAbsolutePath();
         if (filePath.equals(rootPath)) {

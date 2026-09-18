@@ -25,6 +25,9 @@ public class MarkorWebViewClient extends GsWebViewClient {
     protected final Activity _activity;
     // tsun-markor fork: serves bundled assets (fonts) over appassets.androidplatform.net
     private WebViewAssetLoader _assetLoader;
+    // tsun-markor fork: invoked after a page finished loading; consumers use it to
+    // re-anchor state that must not mistake the load's scroll-restore for user scrolling.
+    private Runnable _onPageSettled;
 
     public MarkorWebViewClient(final WebView webView, final Activity activity) {
         super(webView);
@@ -34,6 +37,25 @@ public class MarkorWebViewClient extends GsWebViewClient {
     /** tsun-markor fork: optional loader so the preview can load bundled fonts. */
     public void setAssetLoader(final WebViewAssetLoader loader) {
         _assetLoader = loader;
+    }
+
+    /**
+     * tsun-markor fork: callback fired from {@link #onPageFinished}, i.e. after
+     * {@code GsWebViewClient} has queued its delayed scroll-restore retries
+     * (50–300ms). Used by the document fragment to re-anchor the auto-hide bar
+     * baseline across that window so the programmatic restore never reads as
+     * a downward user scroll (which would instantly hide the bars).
+     */
+    public void setOnPageSettled(final Runnable callback) {
+        _onPageSettled = callback;
+    }
+
+    @Override
+    public void onPageFinished(final WebView webView, final String url) {
+        super.onPageFinished(webView, url);
+        if (_onPageSettled != null) {
+            _onPageSettled.run();
+        }
     }
 
     @Override
