@@ -663,6 +663,17 @@ public abstract class SyntaxHighlighterBase {
     }
 
     protected final void createMonospaceSpanForMatches(final Pattern pattern, int... groupsToMatch) {
+        // tsun-markor fork: skip the switch to system monospace when the configured editor
+        // font is itself a monospace family file - every bundled monospace font carries
+        // "mono"/"code" in its name (Operator Mono, Liberation Mono, Source Pro Code).
+        // Upstream's switch assumes a possibly-proportional editor font and visibly breaks
+        // consistency for mono ones; code still differs via its background color span.
+        if (_fontFamily != null) {
+            final String f = _fontFamily.toLowerCase();
+            if (f.contains("mono") || f.contains("code")) {
+                return;
+            }
+        }
         createTypefaceSpanForMatches(pattern, "monospace", groupsToMatch);
     }
 

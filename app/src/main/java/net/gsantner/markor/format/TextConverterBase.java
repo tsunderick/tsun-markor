@@ -62,7 +62,7 @@ public abstract class TextConverterBase {
     protected static final String HTML001_HEAD_WITH_BASESTYLE = "<html lang='" + TOKEN_POST_LANG + "'><head><meta charset='UTF-8'>" + CSS_S + "html,body{padding:4px 8px 4px 8px;font-family:'" + TOKEN_FONT + "';}h1,h2,h3,h4,h5,h6{font-family:'sans-serif-condensed';}a{color: " + TOKEN_LINK_COLOR + ";text-decoration:underline;}img{height:auto;max-width:100%;max-height: 90vh;margin:auto;}html,body{overflow-x:hidden;}table{display:block;overflow-x:auto;}" + CSS_E;
     protected static final String HTML002_HEAD_WITH_STYLE_LIGHT = CSS_S + "html,body{color:#303030;}blockquote{color:#73747d;}" + CSS_E;
     // tsunderick: OLED dark style - pure black, warm white text, sakura accents
-    protected static final String HTML002_HEAD_WITH_STYLE_DARK = CSS_S + "html,body{color:#f0eaed;background-color:#000000;}a:link,a:visited{color:#ff8fb1;}blockquote{color:#da9fdc;border-left:3px solid #ff8fb1;padding-left:8px;margin-left:0;margin-right:0;}code,pre{background-color:#111111;}" + CSS_E;
+    protected static final String HTML002_HEAD_WITH_STYLE_DARK = CSS_S + "html,body{color:#f0eaed;background-color:#000000;}a:link,a:visited{color:#ff8fb1;}blockquote{color:#da9fdc;border-left:3px solid #ff8fb1;padding-left:8px;margin-left:0;margin-right:0;}code,pre{background-color:#000000;}" + CSS_E;
     protected static final String HTML003_RIGHT_TO_LEFT = CSS_S + "body{text-align:" + TOKEN_TEXT_DIRECTION + ";direction:rtl;}" + CSS_E;
     protected static final String HTML004_HEAD_META_VIEWPORT_MOBILE = "<style>video, img { max-width: 100%; } pre { max-width: 100%; overflow: auto; } </style>";//"<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'>";
     protected static final String HTML100_PERCENT_IN_FILEPATH = "<base>" + JS_S + "var newbase = document.baseURI.split('%').join('%25'); document.querySelector('base').setAttribute('href', newbase);" + JS_E;
@@ -215,6 +215,25 @@ public abstract class TextConverterBase {
                 for (String[] v : variants) {
                     appendFontFace(fontCss, base + v[0], v[1], v[2]);
                 }
+                // tsunderick: code family - same family, but pinned to the Regular face as
+                // its default. Editors render code at regular weight; differentiation is
+                // color's job (Prism), not weight's. The full variant set is declared so
+                // italic code comments resolve to the true cursive face instead of a
+                // synthetic oblique (comment rule lives in prism-markor.css - tsun-FONTS.md).
+                // pre/code must be styled explicitly: normal-mode code inherits the body
+                // font instead of declaring monospace, so the generic swap below never
+                // reached it (and would have pointed it at the body face anyway).
+                // Selector specificity is the whole game: prism-tomorrow sets its
+                // Consolas/Monaco stack on code[class*="language-"] (0,1,1), which outranks
+                // a bare `pre, code` (0,0,1) - and that old swap never matched the stack at
+                // all, so preview code blocks silently rendered in system monospace even
+                // before the fork's font work (DevTools-verified). These selectors tie the
+                // theme at (0,1,1) and win on document order (this style comes last).
+                appendFontFace(fontCss, "customfont-code", base + " - Regular.ttf", null, null);
+                for (String[] v : variants) {
+                    appendFontFace(fontCss, "customfont-code", base + v[0], v[1], v[2]);
+                }
+                fontCss.append(" pre, code, pre[class*='language-'], code[class*='language-'], :not(pre) > code { font-family: 'customfont-code'; }");
             }
             if (fontCss.length() > 0) {
                 html += CSS_S + fontCss + CSS_E;
@@ -271,18 +290,23 @@ public abstract class TextConverterBase {
 
     private static final String APPASSETS_BASE = "https://appassets.androidplatform.net/assets/";
 
+    private static void appendFontFace(final StringBuilder fontCss, final String fontPath, final String weight, final String style) {
+        appendFontFace(fontCss, "customfont", fontPath, weight, style);
+    }
+
     /**
-     * Append an {@code @font-face} rule for the given font file path to {@code fontCss}.
+     * Append an {@code @font-face} rule for the given font file path to {@code fontCss},
+     * declared under the given CSS font-family (e.g. {@code customfont}, {@code customfont-code}).
      * Only asset paths ({@code /android_asset/...}) are supported - they are served by
      * the {@link androidx.webkit.WebViewAssetLoader} registered on the preview's client.
      * {@code weight}/{@code style} may be null for the default face.
      */
-    private static void appendFontFace(final StringBuilder fontCss, final String fontPath, final String weight, final String style) {
+    private static void appendFontFace(final StringBuilder fontCss, final String family, final String fontPath, final String weight, final String style) {
         if (!fontPath.startsWith("/android_asset/")) {
             return;
         }
         final String url = APPASSETS_BASE + fontPath.substring("/android_asset/".length()).replace(" ", "%20");
-        fontCss.append(" @font-face { font-family: customfont;");
+        fontCss.append(" @font-face { font-family: ").append(family).append(";");
         if (weight != null) {
             fontCss.append(" font-weight: ").append(weight).append(";");
         }

@@ -9,3 +9,103 @@ pre[class*="language-"] > code {
     white-space: inherit;
     overflow-wrap: inherit;
 }
+
+/* tsunderick: code comments in true italics - font-style:italic resolves to the
+   cursive Italic @font-face injected for the preview's font family (see
+   TextConverterBase customfont-code / tsun-FONTS.md), instead of Chromium's
+   synthetic oblique. prism-tomorrow ships comments color-only. */
+.token.comment, .token.block-comment, .token.prolog, .token.doctype, .token.cdata {
+    font-style: italic;
+}
+
+/* ── tsunderick: sakura code blocks, coherent with omarchy-tsunderick-theme ──
+   Palette source: colors.toml (single source of truth, nvim_* editor set).
+   Block chrome: pure black (nvim_dark_bg) with a thin rounded accent border
+   (#ff8fb1) - the same pink that borders blockquotes in the preview style.
+   This file loads after prism-tomorrow.min.css, so same-specificity rules
+   win on document order (DevTools-verified). */
+
+pre[class*="language-"],
+code[class*="language-"] {
+    background: #000000; /* nvim_dark_bg */
+}
+
+pre[class*="language-"] {
+    border: 1px solid #ff8fb1; /* accent - echoes blockquote border */
+    border-radius: 8px;
+}
+
+code[class*="language-"] {
+    color: #f0eaed; /* foreground - plain code text */
+}
+
+/* smaller code text on handheld - more columns per line before wrapping.
+   Deliberately applied to pre only: an em font-size on the code selector would
+   compound with pre's (0.75 x 0.75) - code inherits instead. */
+pre[class*="language-"] {
+    font-size: 0.75em; /* dial: 0.6em = even denser, 0.85em = roomier */
+}
+
+/* token palette = the nvim_* editor set from colors.toml */
+.token.comment, .token.block-comment, .token.prolog, .token.doctype, .token.cdata {
+    color: #da9fdc; /* nvim_muted - orchid (stays italic via the rule above) */
+}
+
+.token.punctuation {
+    color: #c6afba; /* nvim_dark_fg - muted mauve */
+}
+
+.token.property, .token.tag {
+    color: #f694be; /* color5 - sakura pink */
+}
+
+.token.boolean, .token.number, .token.constant, .token.symbol {
+    color: #ff9fb2; /* nvim_yellow - warm rose */
+}
+
+.token.selector, .token.attr-name {
+    color: #f694be; /* color5 - sakura pink */
+}
+
+.token.string, .token.char, .token.attr-value {
+    color: #a7abde; /* nvim_green - periwinkle, "strings in code" */
+}
+
+.token.builtin {
+    color: #f7b3d7; /* nvim_cyan */
+}
+
+.token.inserted {
+    color: #80ef80; /* nvim_bright_green */
+}
+
+.token.operator, .token.entity, .token.url, .token.variable {
+    color: #c6afba; /* nvim_dark_fg - muted mauve */
+}
+
+.token.atrule, .token.keyword {
+    color: #dcc1eb; /* nvim_blue - lilac */
+}
+
+.token.function {
+    color: #f7b3d7; /* nvim_cyan */
+}
+
+.token.class-name {
+    color: #e8d0f2; /* nvim_bright_blue - bright lilac */
+}
+
+.token.regex, .token.important, .token.deleted {
+    color: #ff5c8a; /* nvim_red */
+}
+
+/* line-number gutter in muted orchid - this file loads BEFORE
+   prism-line-numbers-markor.css (whose grey #999 rules would otherwise win on
+   order), so these selectors carry one extra class for specificity (0,2,x). */
+pre[class*="language-"] .line-numbers-rows {
+    border-right: 1px solid #da9fdc;
+}
+
+pre[class*="language-"] .line-numbers-rows > span:before {
+    color: #da9fdc;
+}
