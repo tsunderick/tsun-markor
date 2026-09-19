@@ -58,6 +58,17 @@ public final class BarScrollHysteresis {
      * required to show the bars again (eager to return).
      */
     public static final int SHOW_HYSTERESIS_PX = 24;
+    /**
+     * A single-frame delta larger than this is not finger movement — at
+     * ~60fps it corresponds to over ~4300px/s, beyond any drag. Ticks this
+     * size are bar-toggle reflow compensation (asynchronous Chromium viewport
+     * adjustments after the WebView is resized), other layout clamps, or
+     * programmatic jumps; the caller re-anchors on them instead of
+     * evaluating them. Harmless for genuine fast flings: re-anchoring
+     * mid-fling only means the next flip needs its normal hysteresis travel
+     * again.
+     */
+    public static final int REFLOW_TICK_PX = 72;
 
     /** Verdict of a scroll tick; the caller applies SHOW/HIDE flips. */
     public enum Decision {
@@ -111,6 +122,21 @@ public final class BarScrollHysteresis {
      */
     public void reanchor(final int y) {
         _anchorY = y;
+    }
+
+    /**
+     * Whether a per-tick scroll delta is big enough to be reflow
+     * compensation or a programmatic jump rather than user dragging. Such
+     * ticks must be re-anchored past, never evaluated: the compensation for
+     * our own bar toggle arrives asynchronously and easily exceeds the hide
+     * hysteresis, re-flipping the state and feeding the toggle&harr;reflow
+     * loop behind the slow-drag jitter.
+     *
+     * @param dy scroll delta of a single tick
+     * @return {@code true} if the tick is too large to be finger movement
+     */
+    public static boolean isReflowTick(final int dy) {
+        return Math.abs(dy) > REFLOW_TICK_PX;
     }
 
     /** Current hysteresis anchor (extreme tracked for the current state). */

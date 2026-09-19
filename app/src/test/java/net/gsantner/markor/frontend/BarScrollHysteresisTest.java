@@ -169,4 +169,21 @@ public class BarScrollHysteresisTest {
         assertTrue(h.barsShown());
         assertEquals(0, h.anchorY());
     }
+
+    /** Reflow-tick classifier: finger-speed deltas pass, single-frame jumps
+     * of reflow-compensation magnitude do not (either sign — compensation
+     * direction depends on which bars toggled). */
+    @Test
+    public void reflowTickClassification() {
+        // Typical slow/normal drag per-frame deltas: user scrolling.
+        for (final int dy : new int[]{0, 1, 3, 5, 12, 20, 40, 60, 72}) {
+            assertFalse("dy=" + dy + " must be user scrolling", BarScrollHysteresis.isReflowTick(dy));
+            assertFalse("dy=" + -dy + " must be user scrolling", BarScrollHysteresis.isReflowTick(-dy));
+        }
+        // Reflow/compensation magnitude (bar heights in px): not draggable in one frame.
+        for (final int dy : new int[]{73, 80, 100, 150, 280, 300}) {
+            assertTrue("dy=" + dy + " must be reflow", BarScrollHysteresis.isReflowTick(dy));
+            assertTrue("dy=" + -dy + " must be reflow", BarScrollHysteresis.isReflowTick(-dy));
+        }
+    }
 }

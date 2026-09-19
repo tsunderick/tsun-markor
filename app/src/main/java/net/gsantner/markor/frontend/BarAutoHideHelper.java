@@ -66,6 +66,13 @@ public final class BarAutoHideHelper {
     private static final long SHOW_GUARD_MS = 120;
     /** Guard armed by {@link #resyncScrollBaseline()} to swallow the jump's own delta. */
     private static final long RESYNC_GUARD_MS = 150;
+    /**
+     * Delay after a bar flip for the settle-resync: Chromium applies
+     * viewport-resize scroll compensation asynchronously, possibly split
+     * across several frames and past the guards; resync once more after it
+     * settles (re-anchors + re-arms the guard briefly).
+     */
+    private static final long SETTLE_RESYNC_MS = 250;
 
     /** Provides the scroll offset and an absolute scroll target for whichever
      * view is currently the content scroller. */
@@ -177,6 +184,13 @@ public final class BarAutoHideHelper {
         final int y = scrollY();
         final int dy = y - _lastScrollY;
         _lastScrollY = y;
+        if (BarScrollHysteresis.isReflowTick(dy)) {
+            // Single-frame jumps this large are reflow compensation or programmatic
+            // scrolls, never finger dragging — re-anchor past them so they can never
+            // flip the state (the toggle<->reflow loop behind the slow-drag jitter).
+            _hyst.reanchor(y);
+            return;
+        }
         if (android.os.SystemClock.uptimeMillis() < _guardUntilMs) {
             return;
         }
@@ -213,6 +227,14 @@ public final class BarAutoHideHelper {
                 _hyst.reanchor(_lastScrollY);
             }
         });
+        // tsun-markor fork: settle-resync — the WebView's reflow compensation for
+        // this very toggle can arrive several frames later and split into medium
+        // ticks below the reflow-tick threshold; re-anchor after it settles.
+        _fragmentRoot.postDelayed(() -> {
+            if (_attached) {
+                resyncScrollBaseline();
+            }
+        }, SETTLE_RESYNC_MS);
     }
 
     /**
