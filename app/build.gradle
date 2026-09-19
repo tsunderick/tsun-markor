@@ -112,6 +112,42 @@ task downloadFonts {
     def convertScript = rootProject.file('scripts/otf2ttf.py')
     def fallback = file('thirdparty/assets/fonts/Source Pro Code.ttf')
     def slotToFile = ['regular': 'Regular', 'italic': 'Italic', 'bold': 'Bold', 'bold_italic': 'Bold Italic']
+    // tsunderick: faces shipped to assets only (font picker + editor default), no res/font
+    // UI slots. 'Light' is the Strategy A body font - see tsun-FONTS.md.
+    def assetsOnlyFaces = ['Light']
+
+    // Fetch "<face>.otf" via gh into .font-cache and convert to TrueType.
+    // Returns the cached TTF, or null when unavailable (caller falls back / skips).
+    def ensureFace = { String weightName ->
+        def name = "Operator Mono - ${weightName}"
+        def cacheOtf = new File(cacheDir, "${name}.otf")
+        def cacheTtf = new File(cacheDir, "${name}.ttf")
+        if (!cacheOtf.exists() || cacheOtf.length() == 0) {
+            cacheDir.mkdirs()
+            println ">> downloadFonts: fetching ${name}.otf"
+            def proc = ['gh', 'api', "repos/tsunderick/dotfiles/contents/assets/resources/fonts/${name.replace(' ', '%20')}.otf",
+                        '-H', 'Accept: application/vnd.github.raw'].execute()
+            cacheOtf.withOutputStream { os -> os << proc.in }
+            if (proc.waitFor() != 0 || cacheOtf.length() == 0) {
+                cacheOtf.delete()
+                println "WARNING: downloadFonts could not fetch '${name}.otf' via gh"
+                return null
+            }
+        }
+        // convert CFF -> TrueType (OTS-friendly); skipped when already converted
+        if (cacheOtf.exists() && cacheOtf.length() > 0 && (!cacheTtf.exists() || cacheTtf.length() == 0)) {
+            def proc = ['python3', convertScript.absolutePath, cacheOtf.absolutePath, cacheTtf.absolutePath]
+                    .execute(null, rootProject.projectDir)
+            proc.waitFor()
+            if (cacheTtf.length() == 0) {
+                cacheTtf.delete()
+                println "WARNING: downloadFonts: conversion failed for '${name}' (python3/fontTools missing?)"
+                return null
+            }
+        }
+        return (cacheTtf.exists() && cacheTtf.length() > 0) ? cacheTtf : null
+    }
+
     doLast {
         assetsFontDir.mkdirs()
         resFontDir.mkdirs()
@@ -120,37 +156,18 @@ task downloadFonts {
         fileTree(dir: resFontDir, include: 'operator_mono_*.otf').each { it.delete() }
 
         slotToFile.each { slot, weightName ->
-            def name = "Operator Mono - ${weightName}"
-            def cacheOtf = new File(cacheDir, "${name}.otf")
-            def cacheTtf = new File(cacheDir, "${name}.ttf")
-            if (!cacheOtf.exists() || cacheOtf.length() == 0) {
-                cacheDir.mkdirs()
-                println ">> downloadFonts: fetching ${name}.otf"
-                def proc = ['gh', 'api', "repos/tsunderick/dotfiles/contents/assets/resources/fonts/${name.replace(' ', '%20')}.otf",
-                            '-H', 'Accept: application/vnd.github.raw'].execute()
-                cacheOtf.withOutputStream { os -> os << proc.in }
-                if (proc.waitFor() != 0 || cacheOtf.length() == 0) {
-                    cacheOtf.delete()
-                    println "WARNING: downloadFonts could not fetch '${name}.otf' via gh"
-                }
-            }
-            // convert CFF -> TrueType (OTS-friendly); skipped when already converted
-            if (cacheOtf.exists() && cacheOtf.length() > 0 && (!cacheTtf.exists() || cacheTtf.length() == 0)) {
-                def proc = ['python3', convertScript.absolutePath, cacheOtf.absolutePath, cacheTtf.absolutePath]
-                        .execute(null, rootProject.projectDir)
-                proc.waitFor()
-                if (cacheTtf.length() == 0) {
-                    cacheTtf.delete()
-                    println "WARNING: downloadFonts: conversion failed for '${name}' (python3/fontTools missing?)"
-                }
-            }
-
-            def src = (cacheTtf.exists() && cacheTtf.length() > 0) ? cacheTtf : fallback
-            def intoAssets = new File(assetsFontDir, "${name}.ttf")
+            def src = ensureFace(weightName) ?: fallback
+            def intoAssets = new File(assetsFontDir, "Operator Mono - ${weightName}.ttf")
             def intoRes = new File(resFontDir, "operator_mono_${slot}.ttf")
             intoAssets.bytes = src.bytes
             intoRes.bytes = src.bytes
             println ">> downloadFonts: ${intoAssets.name} / ${intoRes.name} <- ${src.name} (${src.length()} bytes)"
+        }
+        assetsOnlyFaces.each { weightName ->
+            def src = ensureFace(weightName) ?: fallback
+            def intoAssets = new File(assetsFontDir, "Operator Mono - ${weightName}.ttf")
+            intoAssets.bytes = src.bytes
+            println ">> downloadFonts: ${intoAssets.name} (assets only) <- ${src.name} (${src.length()} bytes)"
         }
     }
 }

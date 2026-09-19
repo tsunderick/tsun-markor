@@ -36,7 +36,8 @@ work. If not, see <https://creativecommons.org/publicdomain/zero/1.0/>.
     <string name="mime_type" translatable="false">MIME type</string>
     <string name="sha_256" translatable="false">SHA-256</string>
 
-    <string name="default_font_family" translatable="false">/android_asset/fonts/Operator Mono - Regular.ttf</string>
+    <!-- tsunderick: Strategy A body font (see tsun-FONTS.md) - Light for OLED reading comfort -->
+    <string name="default_font_family" translatable="false">/android_asset/fonts/Operator Mono - Light.ttf</string>
     <string name="start" translatable="false">Start</string>
     <string name="quicknote" translatable="false">QuickNote</string>
     <string name="todo" translatable="false">To-Do</string>
