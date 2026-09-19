@@ -64,8 +64,24 @@ DEV_PKG      ?= net.gsantner.markor
 # filename and never touches this file - always use `make apk` to refresh it.
 APK_ARTIFACT ?= dist/tsun-markor-phone.apk
 
-.PHONY: emulator gradle-dev relaunch dev apk
-emulator:
+.PHONY: emulator emulator-boot quiet-ime gradle-dev relaunch dev apk
+.NOTPARALLEL: emulator emulator-boot quiet-ime
+
+# Disarm the soft-keyboard stack (Gboard floating toolbar) after every boot.
+# Idempotent: Android's boot-time IME enforcement resurrects default IMEs when
+# none are enabled, so the kill is re-applied here; `pm disable-user` is
+# package-level and itself survives reboots. Hardware typing (hw.keyboard=yes
+# in the dotfiles-managed AVD config) never touches the IME: keys go straight
+# to the focused view.
+quiet-ime:
+	@-$(ADB_BIN) shell pm disable-user --user 0 com.google.android.inputmethod.latin >/dev/null 2>&1
+	@-$(ADB_BIN) shell ime disable com.google.android.tts/com.google.android.apps.speech.tts.googletts.settings.asr.voiceime.VoiceInputMethodService >/dev/null 2>&1
+	@$(ADB_BIN) shell settings put secure show_ime_with_hard_keyboard 0
+	@echo ">> IMEs disarmed (hardware keyboard only)"
+
+emulator: emulator-boot quiet-ime
+
+emulator-boot:
 	@if $(ADB_BIN) devices | grep -q "emulator.*device$$"; then \
 	  echo ">> emulator already running"; \
 	else \

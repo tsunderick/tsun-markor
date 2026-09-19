@@ -32,6 +32,11 @@ reinstalls, and restarts on the emulator. That is the whole dev loop.
 
 Emulator window opens on your desktop — it is a full Android device (AVD
 named `tsunderelkasten`). The app appears *inside* it after `make dev`.
+The AVD config is dotfiles-managed (`assets/.android/avd/…`, `hw.keyboard =
+yes`: your computer keyboard types into it as hardware input), and
+`make emulator` / `make dev` disarm the soft-keyboard stack (Gboard + voice
+IME) on every boot — Android's IME enforcement would otherwise resurrect
+Gboard and its floating toolbar.
 
 ## One-time setup (already done on this machine, notes for a new machine)
 
@@ -172,14 +177,15 @@ Theme default is `dark-black` ("Black" in the picker) via
 
 One font directory, three consumers. The single source of truth is
 `app/thirdparty/assets/fonts/` (upstream's own asset dir — files merge into
-the APK automatically). The 4 Operator Mono faces there are **gitignored**
+the APK automatically). The Operator Mono faces there are **gitignored**
 (`/app/thirdparty/assets/fonts/Operator*.otf` — commercial font, never
 committed); they are fetched by `make fonts` or the `downloadFonts` Gradle
 task from the **private** `tsunderick/dotfiles` repo via `gh api`. Builds
 without gh access still succeed — the fetch is skipped with a warning and
 the bundled *Source Pro Code* font stands in everywhere.
 
-- **Editor**: font preference default `/android_asset/fonts/Operator Mono - Regular.otf`.
+- **Editor**: font preference default `/android_asset/fonts/Operator Mono - Light.ttf`
+  (Strategy A — the weight ladder is documented in `tsun-FONTS.md`).
   Emphasis uses the **true faces, not the synthetic skew**: `*italic*` renders the
   cursive Operator Mono Italic, `**bold**` the true Bold, and `***both***` the true
   Bold Italic. `SyntaxHighlighterBase` derives sibling variant paths from the chosen
@@ -201,9 +207,14 @@ the bundled *Source Pro Code* font stands in everywhere.
   `Access-Control-Allow-Origin: *` header — fonts are CORS-checked and the
   preview page's origin is `null` due to `file://`). True bold/italic faces
   are injected, not synthesized. When a custom font is active, headings
-  (upstream hardcodes `sans-serif-condensed`) and code blocks (hardcoded
-  `monospace`) are swapped to it too — Operator Mono everywhere in the
-  rendered view.
+  (upstream hardcodes `sans-serif-condensed`) are swapped to it; code blocks
+  are pinned to the family's **Regular** face via a second `customfont-code`
+  family with true variants, whose selector deliberately ties the Prism
+  theme's `code[class*="language-"]` specificity — the original
+  `font-family: monospace` swap never matched the Prism stack, so preview code
+  was silently system-monospace before this was fixed (see `tsun-FONTS.md`).
+  Prism code comments render in the true cursive Italic
+  (`prism-markor.css`).
 
 > History lesson (why this took three attempts): plain `file:///android_asset/…`
 > font URLs are **blocked** by WebView (`setAllowFileAccessFromFileURLs=false`),
@@ -217,9 +228,12 @@ the bundled *Source Pro Code* font stands in everywhere.
 
 `TextConverterBase` dark style + token colors restyled to the OLED palette:
 pure black body, `#f0eaed` text, pink links/headings/underlines, orchid
-blockquotes with pink border, `#111` code blocks, `#444` table borders.
+blockquotes with pink border, black code blocks with a thin rounded `#ff8fb1`
+border and the `omarchy-tsunderick-theme` `nvim_*` token palette
+(`prism-markor.css`), `#444` table borders.
 Markdown converter's frontmatter chips and inline-code backgrounds darkened
-to match. Frontmatter items render as `key: value` — the key is a visible
+to match (chips carry a translucent pink border). Frontmatter items render as
+`key: value` — the key is a visible
 muted-orchid label (`#da9fdc`) instead of upstream's values-only display, and
 values containing `[[wikilinks]]` render as clickable anchors (vault-resolved,
 heading anchors scroll — same routing as body links).
